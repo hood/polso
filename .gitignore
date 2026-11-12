@@ -1,0 +1,5 @@
+.build/
+*.app
+snapshots/
+dist/
+.DS_Store
