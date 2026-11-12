@@ -251,6 +251,13 @@ if let i = args.firstIndex(of: "--snapshot"), i + 1 < args.count {
         exit(0)
     }
     RunLoop.main.run()
+} else if let i = args.firstIndex(of: "--film"), i + 1 < args.count {
+    let dir = args[i + 1]
+    Task { @MainActor in
+        await film(to: dir)
+        exit(0)
+    }
+    RunLoop.main.run()
 } else if let reply = SocketServer.send(args.contains("--settings") ? #"{"type":"settings"}"# : "",
                                         to: Config.load().0.socketPath) {
     // Already running: hand off instead of spawning a second notch.

@@ -45,6 +45,12 @@ snapshot dir="snapshots": build
     mkdir -p "{{dir}}"
     .build/release/Polso --snapshot "$(cd "{{dir}}" && pwd)"
 
+# render the README clips (docs/media) from a deterministic timeline
+film: build
+    rm -rf .build/film
+    .build/release/Polso --film "$PWD/.build/film"
+    ./scripts/encode-film.sh .build/film docs/media
+
 # send raw protocol JSON, e.g. just send '{"type":"ping"}'
 send json:
     @echo '{{json}}' | nc -U "{{sock}}"
