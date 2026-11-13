@@ -42,6 +42,7 @@ struct Dot: View {
             dot.phaseAnimator([false, true]) { v, on in
                 v.shadow(color: color, radius: on ? 6 : 2).scaleEffect(on ? 1.5 : 1)
             } animation: { _ in .easeInOut(duration: 0.8) }
+            .geometryGroup()
         } else {
             dot.shadow(color: color, radius: 3)
         }

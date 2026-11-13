@@ -34,7 +34,10 @@ start:
 
 # quit the running app
 stop:
-    pkill -x Polso || true
+    #!/usr/bin/env bash
+    pkill -x Polso || exit 0
+    for _ in $(seq 50); do pgrep -x Polso >/dev/null || exit 0; sleep 0.1; done
+    pkill -9 -x Polso || true
 
 # run the binary in the foreground (logs to the terminal)
 dev: build stop

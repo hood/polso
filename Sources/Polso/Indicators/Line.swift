@@ -14,15 +14,16 @@ struct LineMeter: View {
         let values = input.state.history
         let floor = input.config.warn ?? 0
         let color = input.health.color
+        let inset: CGFloat = 3
         GeometryReader { geo in
             ZStack(alignment: .topLeading) {
                 Sparkline(values: values, color: color, floor: floor, lineWidth: 1.6, fill: true)
-                    .padding(.trailing, 6)
+                    .padding(.trailing, inset)
                 Dot(color: color, pulsing: input.health == .crit)
-                    .position(x: geo.size.width - 3, y: Sparkline.lastY(values, floor: floor, height: geo.size.height))
+                    .position(x: geo.size.width - inset, y: Sparkline.lastY(values, floor: floor, height: geo.size.height))
             }
         }
         .padding(.horizontal, 8)
-        .padding(.vertical, 9)
+        .padding(.vertical, 6)
     }
 }
