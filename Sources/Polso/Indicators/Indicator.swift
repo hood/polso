@@ -39,10 +39,10 @@ struct Dot: View {
     var body: some View {
         let dot = Circle().fill(color).frame(width: 6, height: 6)
         if pulsing {
-            TimelineView(.animation) { tl in
-                let on = (1 - cos(tl.date.timeIntervalSinceReferenceDate * .pi / 0.8)) / 2
-                dot.shadow(color: color, radius: 2 + 4 * on).scaleEffect(1 + 0.5 * on)
-            }
+            dot.phaseAnimator([false, true]) { v, on in
+                v.shadow(color: color, radius: on ? 6 : 2).scaleEffect(on ? 1.5 : 1)
+            } animation: { _ in .easeInOut(duration: 0.8) }
+            .geometryGroup()
         } else {
             dot.shadow(color: color, radius: 3)
         }
