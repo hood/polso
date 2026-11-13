@@ -1,0 +1,84 @@
+---
+title: Sources
+description: Let polso poll shell commands, PromQL queries and /metrics endpoints on its own.
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+Sources are things polso polls by itself, listed under `sources` in `~/.config/polso/config.json` or edited in
+**Settings › Sources** (with a **Test** button that runs one poll and shows the result). The default config ships two
+`exec` sources: load average and memory pressure.
+
+Fields shared by every kind:
+
+| field | default | |
+|---|---|---|
+| `kind` | | `exec`, `prometheus` or `scrape` |
+| `name` | command / query / metric | shown in errors and Settings |
+| `slot` | | wing that plain numbers go to. Required for `prometheus` and `scrape` |
+| `every` | `15` | seconds between polls (min 1) |
+| `timeout` | `10` | seconds before a poll is abandoned |
+| `enabled` | `true` | |
+
+Errors show up in the footer of the hover panel, one per failing source, and clear on the next good poll.
+
+## `exec`
+
+Runs `command` with `/bin/sh -c`. Stdout is either:
+
+- **a bare number**, which goes to `slot`, or
+- **protocol JSON**: an object, an array, or one message per line. So a command can feed both wings, ping and
+  alert, exactly like a socket client.
+
+```json
+{"kind": "exec", "slot": "left", "every": 5, "command": "sysctl -n vm.loadavg | awk '{print $2}'"}
+```
+
+```json
+{"kind": "exec", "every": 60, "command": "~/bin/ci-status.sh"}
+```
+
+```sh
+#!/bin/sh
+# ~/bin/ci-status.sh: one poll, several messages
+failed=$(gh run list -L 20 --json conclusion -q '[.[] | select(.conclusion=="failure")] | length')
+echo "{\"slot\":\"right\",\"value\":$failed,\"label\":\"$failed red\"}"
+[ "$failed" -gt 0 ] && echo '{"type":"ping","slot":"right"}'
+```
+
+<Aside type="caution" title="PATH">
+LaunchAgents start with an almost empty `PATH`. polso appends `/opt/homebrew/bin`, `/usr/local/bin`, `/usr/bin`,
+`/bin`, `/usr/sbin` and `/sbin`. Anything else needs an absolute path. A non-zero exit becomes an error with the
+first stderr line. Pings in exec output without a `slot` run across the whole notch, even though the source has one.
+</Aside>
+
+## `prometheus`
+
+An instant PromQL query against `url` (the server root, e.g. `http://prom:9090`). The **first series** of the result
+feeds `slot`, so aggregate down to one (`sum`, `max`, `topk(1, …)`).
+
+```json
+{"kind": "prometheus", "slot": "right", "every": 15,
+ "url": "http://prom:9090", "query": "sum(rate(http_requests_total{code=~\"5..\"}[5m]))"}
+```
+
+On the first poll polso runs a range query over `every × history` seconds, so the sparkline is full from the
+start instead of filling up over half an hour.
+
+## `scrape`
+
+Reads a Prometheus text exposition endpoint directly. No Prometheus server needed.
+
+```json
+{"kind": "scrape", "slot": "right", "every": 15, "url": "http://localhost:9100/metrics",
+ "metric": "http_requests_total", "labels": {"code": "500"}, "rate": true}
+```
+
+| field | |
+|---|---|
+| `url` | the `/metrics` endpoint |
+| `metric` | exact metric name |
+| `labels` | every listed label must match exactly. Unlisted labels are ignored |
+| `rate` | `true` turns a counter into a per-second rate between polls. The first poll yields nothing. Counter resets are skipped |
+
+All matching series are **summed**.

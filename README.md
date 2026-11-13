@@ -6,7 +6,8 @@
 
 <p align="center">
   Your MacBook notch as a live meter for anything.<br>
-  Feed it numbers, pings and alerts from any script, or let it poll commands and Prometheus.
+  Feed it numbers, pings and alerts from any script, or let it poll commands and Prometheus.<br>
+  <a href="https://hood.github.io/polso/"><b>Docs and live demo →</b></a>
 </p>
 
 ```sh

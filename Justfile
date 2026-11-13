@@ -84,6 +84,10 @@ settings:
 reset-config: stop
     rm -f "{{config}}"
 
+# run the docs site locally (site/)
+site:
+    cd site && pnpm install && pnpm dev
+
 # remove build artifacts
 clean:
     swift package clean

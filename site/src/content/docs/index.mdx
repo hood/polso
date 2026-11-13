@@ -1,0 +1,56 @@
+---
+title: polso
+description: Your MacBook notch as a live meter for anything. Feed it numbers, pings and alerts from any script, or let it poll commands and Prometheus.
+template: splash
+hero:
+  title: Your notch, <span class="p-grad">alive.</span>
+  tagline: polso turns the MacBook notch into a live meter for anything. Pipe numbers, pings and alerts in from any script, or let it poll shell commands and Prometheus on its own.
+---
+
+import { Card, CardGrid } from '@astrojs/starlight/components';
+import Notch from '../../components/Notch.astro';
+import Actions from '../../components/Actions.astro';
+import { withBase } from '../../lib/url';
+
+<Actions />
+
+<Notch />
+
+<p class="p-hint">This is a live port of the real notch. Hit a preset or type any protocol message. It's the exact JSON you'd pipe into the socket.</p>
+
+<CardGrid>
+  <Card title="Two wings, any number" icon="analytics">
+    Line, gauge or dot matrix on each side, with warn and crit thresholds, units, inverted scales and stale
+    detection.
+  </Card>
+  <Card title="Pings" icon="rocket">
+    A comet runs the notch outline and the target wing glows. Perfect for "something happened" without the noise
+    of a notification.
+  </Card>
+  <Card title="Alerts" icon="warning">
+    `info`, `warn` and `crit` banners drop out of the notch with sparks. They queue up, and repeats bump a counter.
+  </Card>
+  <Card title="One socket, zero deps" icon="server">
+    Newline-delimited JSON over a unix socket. `nc`, Python, Node, Go, cron, CI hooks: if it can write a line, it can
+    drive polso.
+  </Card>
+  <Card title="Or let it pull" icon="database">
+    Built-in sources run shell commands, PromQL queries or scrape `/metrics` on an interval, with backfill and
+    counter rates.
+  </Card>
+  <Card title="Native and light" icon="apple">
+    SwiftUI, a few MB, ~0% CPU at idle. Animations only tick while something moves. Hover to open the panel.
+  </Card>
+</CardGrid>
+
+## In thirty seconds
+
+```sh
+git clone https://github.com/hood/polso && cd polso
+just install && just start                       # ~/Applications/Polso.app
+
+echo '{"type":"value","slot":"left","value":42}' | nc -U ~/.config/polso/sock
+echo '{"type":"alert","title":"Deploy failed"}'  | nc -U ~/.config/polso/sock
+```
+
+<video class="p-media" src={withBase('media/hero.mp4')} autoplay muted loop playsinline width="760" aria-label="A terminal sends two pings and an alert to the notch, then the cursor hovers to open the panel"></video>

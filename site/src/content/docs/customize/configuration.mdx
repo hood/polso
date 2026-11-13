@@ -1,0 +1,76 @@
+---
+title: Configuration
+description: Every key in ~/.config/polso/config.json, with defaults.
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+`~/.config/polso/config.json` is created with the defaults on first launch. Your file is **deep-merged over the
+defaults**, so it only needs the keys you change. It's re-read every 2 seconds and on hover, so edits apply live.
+Everything here is also editable in **Settings** (relaunch the app, or `just settings`).
+
+```json title="~/.config/polso/config.json"
+{
+  "left":  { "title": "p95 latency", "indicator": "line", "unit": "ms", "warn": 250, "crit": 800 },
+  "right": { "title": "battery", "indicator": "gauge", "unit": "%", "warn": 30, "crit": 15, "invert": true, "max": 100 },
+  "ping":  { "color": "info", "sound": "Tink" }
+}
+```
+
+A broken file doesn't kill the app: polso keeps running on defaults and shows `config: bad value at left.warn`
+(or similar) in the panel footer.
+
+## Wings: `left`, `right`
+
+| key | default (left / right) | |
+|---|---|---|
+| `title` | `"load 1m"` / `"memory"` | panel card title |
+| `indicator` | `"line"` / `"gauge"` | `line`, `gauge` or `dots`. See [Indicators](../indicators/) |
+| `unit` | `""` / `"%"` | `%`, `ms`, `s` get smart formatting (`1.20s`, `850ms`). Units starting with `/` stick to the number (`12/s`). Anything else is appended verbatim |
+| `warn` | cores × 0.7 / `75` | yellow at or above. Optional |
+| `crit` | cores / `90` | red at or above. Optional |
+| `invert` | `false` | low is bad: yellow at or **below** `warn`, red at or below `crit` |
+| `max` | `null` / `100` | gauge full scale. Default 1.25 × the worse threshold, else the history peak |
+| `history` | `30` | samples kept for the sparkline / dot matrix (min 2) |
+| `staleAfter` | `60` | seconds without data before the wing goes gray. `0` = never |
+| `blink` | `true` | flash the wing on every new value |
+
+`warn` must be below `crit` (above it when `invert` is on). The settings window and the panel footer say so if not.
+
+## `ping`
+
+| key | default | |
+|---|---|---|
+| `comet` | `true` | dot running along the notch outline |
+| `pulse` | `true` | double glow on the targeted wing(s) |
+| `color` | `"crit"` | default color when a ping has none |
+| `sound` | `""` | system sound name (`Tink`, `Pop`, `Glass`, `Funk`…), empty = silent |
+
+## `alert`
+
+| key | default | |
+|---|---|---|
+| `duration` | `5` | seconds a banner stays down |
+| `sound` | `""` | system sound name |
+| `queue` | `true` | `false`: a new alert replaces the one on screen |
+
+## `expanded` (hover panel)
+
+| key | default | |
+|---|---|---|
+| `enabled` | `true` | `false` disables hover-to-expand |
+| `width` | `560` | points |
+| `height` | `360` | points |
+| `logSize` | `50` | recent pings and alerts kept |
+
+## Top level
+
+| key | default | |
+|---|---|---|
+| `socket` | `"~/.config/polso/sock"` | max 103 bytes once expanded (a unix socket limit) |
+| `wingWidth` | `64` | points per wing |
+| `sources` | load + memory `exec` | see [Sources](../../send/sources/) |
+
+<Aside type="tip">
+`just reset-config` deletes the file. The next launch writes fresh defaults.
+</Aside>

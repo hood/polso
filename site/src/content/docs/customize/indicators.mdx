@@ -1,0 +1,70 @@
+---
+title: Indicators
+description: The built-in wing meters, and how to add your own in one file.
+---
+
+import { withBase } from '../../../lib/url';
+
+<img class="p-media" src={withBase('media/indicators.webp')} width="470" alt="line, gauge and dot matrix indicators updating, with pings" />
+
+| id | looks like | good for |
+|---|---|---|
+| `line` | heartbeat sparkline with a fill and a glowing "now" dot that breathes at `crit` | trends: load, latency, request rate |
+| `gauge` | 270° ring with warn/crit ticks, plus the value or `label` next to it | bounded values: %, quotas, battery |
+| `dots` | LED dot matrix of the trend, each lit dot tinted by the value its row stands for, newest column glowing | the same as `line`, with more character |
+
+Set one per wing with `"indicator": "<id>"`.
+
+## Writing your own
+
+An indicator is a SwiftUI view that gets the wing's state, config and health. Add a file to
+`Sources/Polso/Indicators/`:
+
+```swift title="Sources/Polso/Indicators/Bars.swift"
+import SwiftUI
+
+/// Last N samples as bars.
+enum BarsIndicator: Indicator {
+    static let id = "bars"          // "indicator": "bars" in config
+    static let label = "Bars"       // shown in Settings
+    static func view(_ i: IndicatorInput) -> AnyView { AnyView(Bars(input: i)) }
+}
+
+struct Bars: View {
+    var input: IndicatorInput
+
+    var body: some View {
+        let v = input.state.history.suffix(12)
+        let top = max(v.max() ?? 1, input.config.crit ?? 0, 1e-9)
+        HStack(alignment: .bottom, spacing: 2) {
+            ForEach(Array(v.enumerated()), id: \.offset) { _, x in
+                Capsule().fill(Health.ramp(x, input.config))
+                    .frame(height: max(2, CGFloat(x / top) * 16))
+            }
+        }
+        .padding(.horizontal, 8).padding(.vertical, 8)
+    }
+}
+```
+
+Then register it:
+
+```swift title="Sources/Polso/Indicators/Indicator.swift" ins="BarsIndicator.kind"
+static let all: [IndicatorKind] = [LineIndicator.kind, GaugeIndicator.kind, DotsIndicator.kind, BarsIndicator.kind]
+```
+
+What you get in `IndicatorInput`:
+
+| | |
+|---|---|
+| `state.history` | `[Double]`, oldest first, capped at `history` |
+| `state.value` | the latest sample |
+| `state.label` | sender-provided text, if any |
+| `config` | the wing's `SlotConfig` (`warn`, `crit`, `max`, `unit`, `invert`…) |
+| `health` | `.ok` `.warn` `.crit` `.unknown`, with `.color` |
+
+Helpers worth reusing: `Sparkline`, `Dot`, `Health.ramp(v, config)` for a continuous green→yellow→red,
+`fmt(v, unit:)` for numbers.
+
+Keep idle cost at zero: no `TimelineView` or repeating animation unless the state calls for it (the built-ins only
+animate at `crit`). `just snapshot` renders every indicator to `./snapshots` so you can check it without a notch.

@@ -1,0 +1,16 @@
+{
+  "name": "polso-site",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "media": "rm -rf public/media && cp -R ../docs/media public/media",
+    "dev": "pnpm media && astro dev",
+    "build": "pnpm media && astro build",
+    "preview": "astro preview"
+  },
+  "dependencies": {
+    "@astrojs/starlight": "0.42.10",
+    "astro": "7.4.11",
+    "sharp": "^0.35.5"
+  }
+}

@@ -1,0 +1,110 @@
+---
+title: Recipes
+description: Copy-paste setups for common things to watch.
+---
+
+All snippets assume this helper in your shell rc:
+
+```sh
+polso() { printf '%s\n' "$1" | nc -U ~/.config/polso/sock >/dev/null; }
+```
+
+## Tell me when a long command ends
+
+```sh
+# usage: done make test
+done() {
+  "$@"; local rc=$?
+  if [ $rc -eq 0 ]; then polso '{"type":"ping","color":"ok"}'
+  else polso "{\"type\":\"alert\",\"title\":\"$1 failed\",\"summary\":\"exit $rc\",\"severity\":\"warn\"}"; fi
+  return $rc
+}
+```
+
+## Coding agent hooks
+
+Ping when an agent wants your attention, e.g. a Claude Code hook in `~/.claude/settings.json`:
+
+```json
+{
+  "hooks": {
+    "Stop": [{ "hooks": [{ "type": "command",
+      "command": "echo '{\"type\":\"ping\",\"color\":\"purple\"}' | nc -U ~/.config/polso/sock" }] }],
+    "Notification": [{ "hooks": [{ "type": "command",
+      "command": "echo '{\"type\":\"alert\",\"title\":\"Agent needs you\",\"severity\":\"info\"}' | nc -U ~/.config/polso/sock" }] }]
+  }
+}
+```
+
+## Laptop vitals
+
+```json
+"right": { "title": "battery", "indicator": "gauge", "unit": "%", "warn": 30, "crit": 15, "invert": true, "max": 100 },
+"left":  { "title": "cpu", "indicator": "dots", "unit": "%", "warn": 60, "crit": 85 },
+"sources": [
+  { "kind": "exec", "slot": "right", "every": 60, "command": "pmset -g batt | grep -o '[0-9]*%' | tr -d %" },
+  { "kind": "exec", "slot": "left", "every": 3,
+    "command": "ps -A -o %cpu | awk -v n=$(sysctl -n hw.ncpu) '{s+=$1} END {print s/n}'" }
+]
+```
+
+## Network latency
+
+```json
+"left": { "title": "1.1.1.1", "indicator": "line", "unit": "ms", "warn": 80, "crit": 250 },
+"sources": [{ "kind": "exec", "slot": "left", "every": 5,
+  "command": "ping -c1 -t2 1.1.1.1 | awk -F/ '/round-trip/{print $5}'" }]
+```
+
+## GitHub Actions
+
+Red runs on the right wing, with an alert linking to the latest failure:
+
+```sh title="~/bin/gh-red.sh"
+#!/bin/sh
+cd ~/code/myrepo || exit 1
+gh run list -L 30 --json conclusion,displayTitle,url | jq -c '
+  [.[] | select(.conclusion=="failure")] as $red
+  | [{slot:"right", value:($red|length), label:"\($red|length) red"}]
+    + (if ($red|length) > 0 then [{type:"alert", title:$red[0].displayTitle, severity:"warn", url:$red[0].url}] else [] end)'
+```
+
+```json
+{ "kind": "exec", "every": 120, "command": "~/bin/gh-red.sh" }
+```
+
+An alert with the same title only bumps a counter, so the banner isn't replayed for the same red run.
+
+## Kubernetes
+
+```json
+{ "kind": "exec", "slot": "right", "every": 30,
+  "command": "kubectl get pods -A --no-headers --field-selector=status.phase!=Running,status.phase!=Succeeded | wc -l" }
+```
+
+## Prometheus error rate
+
+```json
+"left": { "title": "5xx/s", "indicator": "line", "unit": "/s", "warn": 0.5, "crit": 2 },
+"sources": [{ "kind": "prometheus", "slot": "left", "every": 15, "url": "http://prom:9090",
+  "query": "sum(rate(http_requests_total{code=~\"5..\"}[5m]))" }]
+```
+
+## Local service, no Prometheus
+
+```json
+{ "kind": "scrape", "slot": "right", "every": 10, "url": "http://localhost:8080/metrics",
+  "metric": "jobs_failed_total", "rate": true }
+```
+
+## Heartbeats from cron
+
+Mark a wing gray if a job stops reporting: give it `staleAfter` a bit above the job period and push a value each run.
+
+```sh
+# crontab: */5 * * * * ~/bin/backup.sh && printf '{"slot":"right","value":1,"label":"backup ok","health":"ok"}\n' | nc -U ~/.config/polso/sock
+```
+
+```json
+"right": { "title": "backup", "indicator": "gauge", "staleAfter": 420 }
+```

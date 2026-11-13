@@ -1,0 +1,41 @@
+---
+title: Troubleshooting
+description: When the notch stays quiet.
+---
+
+### `nc: ... Connection refused` / `No such file or directory`
+
+polso isn't running, or `socket` points elsewhere. `just start`, then check `ls -l ~/.config/polso/sock`.
+
+### `polso is already running`
+
+Launching the binary twice hands off to the running instance instead of drawing a second notch. Use `just restart`
+after a rebuild.
+
+### A wing is gray
+
+No value yet, or nothing arrived for `staleAfter` seconds. Hover the notch: source errors are listed in the panel
+footer. **Settings › Sources › Test** runs a single poll and shows exactly what came back.
+
+### An exec source works in my terminal but not in polso
+
+Usually `PATH`. polso adds Homebrew and the system dirs, but not `~/.local/bin`, `nvm`, `pyenv` shims and the like.
+Use absolute paths, or `"command": "zsh -lc 'mytool status'"` to load your login profile.
+
+### `config: bad value at …`
+
+The config file failed to parse at that key. polso runs on defaults until it's fixed. The message names the key
+path, e.g. `left.warn`.
+
+### `warn must be below crit`
+
+Swap them, or set `"invert": true` if low is bad.
+
+### The notch is in the wrong place on an external display
+
+polso draws on the screen with a camera housing, else the main one. On Macs without a notch it draws a
+compact fake one at the top center.
+
+### Start at login
+
+`just login` installs `~/Library/LaunchAgents/local.polso.plist`, `just unlogin` removes it.

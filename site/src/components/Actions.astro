@@ -1,0 +1,10 @@
+---
+import { LinkButton } from '@astrojs/starlight/components';
+import { withBase } from '../lib/url';
+---
+
+<div class="p-actions not-content">
+  <LinkButton href={withBase('start/getting-started/')} icon="right-arrow">Get started</LinkButton>
+  <LinkButton href={withBase('send/socket/')} variant="secondary">Protocol</LinkButton>
+  <LinkButton href="https://github.com/hood/polso" variant="minimal" icon="github" iconPlacement="start">GitHub</LinkButton>
+</div>

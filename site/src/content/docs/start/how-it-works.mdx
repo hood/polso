@@ -1,0 +1,63 @@
+---
+title: How it works
+description: Wings, pings, alerts and the hover panel.
+---
+
+import { withBase } from '../../../lib/url';
+
+polso has four things to look at. Everything you send maps to one of them.
+
+## Wings
+
+The black notch grows two wings, `left` and `right`. Each one is a meter with its own
+[indicator](../../customize/indicators/), unit and thresholds. Every value you send is appended to that wing's
+history (30 samples by default) and colors it by health:
+
+| health | when | color |
+|---|---|---|
+| `ok` | below `warn` | <span class="p-swatch" style="color:#30d158"></span>green |
+| `warn` | at or above `warn` | <span class="p-swatch" style="color:#ffc70a"></span>yellow |
+| `crit` | at or above `crit` | <span class="p-swatch" style="color:#ff453b"></span>red, the "now" dot breathes |
+| `unknown` | no data yet, or stale | <span class="p-swatch" style="color:#7d7d82"></span>gray |
+
+With `invert: true` low is bad (battery, throughput) and the comparisons flip. A sender can also force a health
+or a text label per value. A wing that gets nothing for `staleAfter` seconds goes gray.
+
+<img class="p-media" src={withBase('media/indicators.webp')} width="470" alt="line, gauge and dot matrix indicators updating, with pings" />
+
+## Pings
+
+A ping is a "something happened" with no number attached. A comet runs along the notch outline, starting from the
+side of the targeted wing, and that wing glows twice. A ping without a `slot` runs across the whole notch and
+glows both wings. Color it with `ok`/`warn`/`crit`/`info`, a name (`purple`) or `#rrggbb`.
+
+## Alerts
+
+Alerts drop a banner out of the notch with sparks and a rim glow tinted by severity (`info` blue, `warn` yellow,
+`crit` red). They stay up `alert.duration` seconds (5 by default) with a countdown bar.
+
+- Alerts arriving while one is showing **queue up** (`alert.queue: false` makes the new one replace it).
+- The same `title` again **bumps a counter** (`×3`) instead of replaying.
+- Hovering the banner opens the panel and dismisses it.
+
+<img class="p-media" src={withBase('media/alerts.webp')} width="640" alt="info, warn and crit alert banners in sequence" />
+
+## The panel
+
+Hover the notch and it expands into a panel: a card per wing with the big value, a sparkline with warn/crit guides
+and the sample count, then a log of recent pings and alerts. Alerts with a `url` open it on click. The footer shows
+config, socket and source errors, plus Settings and Quit.
+
+## Under the hood
+
+```
+ scripts, cron, CI ──► ~/.config/polso/sock ──┐
+                         (NDJSON, mode 600)   ├──► Store ──► notch (SwiftUI, NSPanel above the menu bar)
+ sources: exec · prometheus · scrape ─────────┘
+```
+
+- One `Store` holds both wings, the ping counters, the alert queue and the log. Socket lines and source results
+  go through the same parser, so a source can do anything a socket client can.
+- The panel window floats above the menu bar on every Space. It ignores the mouse except while expanded.
+- Animations run only while something moves. Idle CPU sits at ~0%.
+- `~/.config/polso/config.json` is checked every 2s and on hover, so edits apply live.

@@ -1,0 +1,70 @@
+---
+title: Getting started
+description: Build polso, launch it and send your first value.
+---
+
+import { Steps, Aside } from '@astrojs/starlight/components';
+
+polso is a macOS 14+ menu-bar-less app. It sits above the menu bar around the camera housing and listens on a
+unix socket. On Macs without a notch it draws a 160pt fake one at the top center.
+
+## Requirements
+
+- macOS 14 Sonoma or later
+- Xcode (or the Swift toolchain) for `swift build`
+- [`just`](https://github.com/casey/just) for the recipes (`brew install just`), optional but handy
+
+## Install
+
+<Steps>
+
+1. Clone and build. The app lands in `~/Applications/Polso.app`, ad-hoc signed.
+
+   ```sh
+   git clone https://github.com/hood/polso && cd polso
+   just install
+   ```
+
+2. Launch it. Two default wings appear: load average on the left, memory on the right.
+
+   ```sh
+   just start
+   ```
+
+3. Send something.
+
+   ```sh
+   echo '{"type":"value","slot":"left","value":42}' | nc -U ~/.config/polso/sock
+   # ok
+   ```
+
+4. Optional: start at login. This installs a LaunchAgent (`local.polso`) that also restarts polso if it crashes.
+
+   ```sh
+   just login     # undo with: just unlogin
+   ```
+
+</Steps>
+
+<Aside type="tip">
+Launching the app a second time (Finder, Spotlight, `open`) doesn't start a second notch: it opens Settings on the
+running one. `just settings` does the same.
+</Aside>
+
+## The recipes
+
+| recipe | does |
+|---|---|
+| `just push left 42` | value to a wing |
+| `just ping right` | comet + glow on the right wing (no arg: whole notch) |
+| `just alert "Deploy failed" crit` | alert banner |
+| `just send '<json>'` | any raw protocol message |
+| `just restart` | rebuild, reinstall, relaunch |
+| `just dev` | run in the foreground with logs |
+| `just reset-config` | drop back to the default config |
+
+## Next
+
+- Feed it from scripts: [Socket protocol](../../send/socket/)
+- Let it poll on its own: [Sources](../../send/sources/)
+- Change what the wings look like: [Configuration](../../customize/configuration/)

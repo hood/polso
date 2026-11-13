@@ -1,0 +1,689 @@
+---
+// Browser port of the polso notch: same shape, line + gauge wings, comet ping and alert burst,
+// driven by the real wire protocol through a JS copy of Message.parse.
+const presets = [
+  { label: 'value', json: '{"type":"value","slot":"left","value":7.4}' },
+  { label: 'label', json: '{"type":"value","slot":"right","value":64,"label":"3 jobs"}' },
+  { label: 'ping', json: '{"type":"ping","slot":"left"}' },
+  { label: 'ping all', json: '{"type":"ping","color":"info"}' },
+  { label: 'info', json: '{"type":"alert","title":"Build passed","summary":"main · 2m 14s","severity":"info"}' },
+  { label: 'warn', json: '{"type":"alert","title":"Disk almost full","summary":"/Volumes/data 94%","severity":"warn"}' },
+  { label: 'crit', json: '{"type":"alert","title":"Deploy failed","summary":"api-gateway · rollout stuck","severity":"crit"}' },
+  { label: 'batch', json: '[{"type":"value","slot":"left","value":9.1},\n {"type":"ping","slot":"left"},\n {"type":"alert","title":"Load spike","severity":"warn"}]' },
+];
+---
+
+<section class="pg not-content" aria-label="Interactive notch demo">
+  <div class="screen">
+    <div class="menubar" aria-hidden="true">
+      <span class="apple"></span><b>Terminal</b><span>Shell</span>
+      <span class="right">Fri 9:41</span>
+    </div>
+    <div class="console">
+      <div class="bar">
+        <span class="dot" style="--c:#ff5f57"></span><span class="dot" style="--c:#febc2e"></span><span class="dot" style="--c:#28c840"></span>
+        <span class="title">nc -U ~/.config/polso/sock</span>
+      </div>
+      <div class="chips">
+        {presets.map((p) => <button type="button" class="chip" data-json={p.json}>{p.label}</button>)}
+      </div>
+      <form id="send">
+        <span class="prompt">❯</span>
+        <textarea id="msg" rows="2" spellcheck="false" aria-label="protocol message">{presets[6].json}</textarea>
+        <button type="submit" class="go">send ⏎</button>
+      </form>
+      <pre id="reply" aria-live="polite"></pre>
+    </div>
+    <canvas id="notch" aria-label="polso notch"></canvas>
+  </div>
+</section>
+
+<script>
+  type Slot = 'left' | 'right';
+  type Health = 'ok' | 'warn' | 'crit' | 'unknown';
+  type Sev = 'info' | 'warn' | 'crit';
+  type Msg =
+    | { k: 'value'; slot: Slot; values: number[]; replace: boolean; label?: string; health?: Health }
+    | { k: 'ping'; slot?: Slot; color?: string }
+    | { k: 'alert'; title: string; summary?: string; severity: Sev; count: number };
+
+  const C = { ok: '#30d158', warn: '#ffc70a', crit: '#ff453b', info: '#59adff', unknown: '#7d7d82' };
+  const NAMED: Record<string, string> = {
+    red: '#ff3b30', orange: '#ff9500', yellow: '#ffcc00', green: '#34c759', mint: '#00c7be', teal: '#30b0c7',
+    cyan: '#32ade6', blue: '#007aff', indigo: '#5856d6', purple: '#af52de', pink: '#ff2d55', white: '#ffffff',
+  };
+  const RAMP: Record<Sev, string[]> = {
+    info: ['#e6f7ff', '#73ccff', '#3373ff'],
+    warn: ['#ffffd9', '#ffd933', '#ff8c0d'],
+    crit: ['#fff2b3', '#ff8c26', '#ff2e33'],
+  };
+
+  // ---------- protocol (port of Messages.swift) ----------
+  class PErr extends Error {}
+  const num = (v: unknown) =>
+    typeof v === 'number' ? v : typeof v === 'string' && v.trim() !== '' && !isNaN(+v) ? +v : undefined;
+
+  function decode(j: any): Msg[] {
+    if (Array.isArray(j)) return j.flatMap(decode);
+    if (j === null || typeof j !== 'object') throw new PErr('expected an object or an array');
+    const type = j.type ?? (j.value !== undefined || j.values !== undefined ? 'value' : '');
+    const slot = (req: boolean): Slot | undefined => {
+      if (j.slot === undefined) {
+        if (req) throw new PErr(`${type}: missing "slot" (left|right)`);
+        return undefined;
+      }
+      if (j.slot !== 'left' && j.slot !== 'right') throw new PErr(`${type}: slot must be "left" or "right"`);
+      return j.slot;
+    };
+    switch (type) {
+      case 'value': {
+        const s = slot(true)!;
+        let values: number[] = [], replace = false;
+        if (j.value !== undefined) {
+          const d = num(j.value);
+          if (d === undefined) throw new PErr('value: "value" must be a number');
+          values = [d];
+        } else if (j.values !== undefined) {
+          if (!Array.isArray(j.values)) throw new PErr('value: "values" must be an array');
+          values = j.values.map(num).filter((x: any) => x !== undefined);
+          replace = true;
+        }
+        let health: Health | undefined;
+        if (typeof j.health === 'string') {
+          if (!['ok', 'warn', 'crit', 'unknown'].includes(j.health)) throw new PErr('value: health must be ok|warn|crit|unknown');
+          health = j.health;
+        }
+        const label = typeof j.label === 'string' ? j.label : undefined;
+        if (!values.length && label === undefined && !health && !replace)
+          throw new PErr('value: needs "value", "values", "label" or "health"');
+        return [{ k: 'value', slot: s, values, replace, label, health }];
+      }
+      case 'ping':
+        return [{ k: 'ping', slot: slot(false), color: typeof j.color === 'string' ? j.color : undefined }];
+      case 'alert': {
+        if (typeof j.title !== 'string' || !j.title) throw new PErr('alert: missing "title"');
+        const sev = j.severity ?? 'crit';
+        if (!['info', 'warn', 'crit'].includes(sev)) throw new PErr('alert: severity must be info|warn|crit');
+        const n = num(j.count);
+        return [{ k: 'alert', title: j.title, summary: typeof j.summary === 'string' ? j.summary : undefined,
+                  severity: sev, count: n === undefined ? 1 : Math.max(1, Math.trunc(n)) }];
+      }
+      case '': throw new PErr('missing "type" (value|ping|alert)');
+      default: throw new PErr(`unknown type "${type}" (value|ping|alert)`);
+    }
+  }
+
+  function parse(text: string): Msg[] {
+    text = text.trim();
+    if (!text) return [];
+    try { return decode(JSON.parse(text)); } catch (e) { if (e instanceof PErr) throw e; }
+    return text.split(/\n+/).filter((l) => l.trim()).flatMap((l) => {
+      let j;
+      try { j = JSON.parse(l); } catch { throw new PErr(`not JSON: ${l.slice(0, 60)}`); }
+      return decode(j);
+    });
+  }
+
+  function parseColor(s?: string): string | undefined {
+    if (!s) return;
+    s = s.trim().toLowerCase();
+    if (s in C && s !== 'unknown') return (C as any)[s];
+    if (NAMED[s]) return NAMED[s];
+    let h = s.replace(/^#/, '');
+    if (h.length === 3) h = [...h].map((c) => c + c).join('');
+    return /^[0-9a-f]{6}$/.test(h) ? '#' + h : undefined;
+  }
+
+  // ---------- state ----------
+  const cfg = {
+    left: { title: 'load 1m', warn: 7, crit: 10, unit: '', history: 30 },
+    right: { title: 'memory', warn: 75, crit: 90, max: 100, unit: '%', history: 30 },
+  };
+  type SlotState = { history: number[]; label?: string; health?: Health; beat: number; ping: number; pingColor: string };
+  const st: Record<Slot, SlotState> = {
+    left: { history: [], beat: -9, ping: -9, pingColor: C.crit },
+    right: { history: [], beat: -9, ping: -9, pingColor: C.crit },
+  };
+  for (let i = 0; i < 30; i++) {
+    st.left.history.push(3.2 + 1.6 * Math.sin(i / 3.5) + Math.random() * 0.6);
+    st.right.history.push(52 + 8 * Math.sin(i / 5) + Math.random() * 3);
+  }
+
+  const healthOf = (s: Slot): Health => {
+    const x = st[s];
+    if (x.health) return x.health;
+    const v = x.history.at(-1);
+    if (v === undefined) return 'unknown';
+    const c = cfg[s];
+    return v >= c.crit ? 'crit' : v >= c.warn ? 'warn' : 'ok';
+  };
+
+  let comet: { t0: number; color: string; reverse: boolean } | null = null;
+  type Spark = { u: number; a: number; v: number; born: number; life: number; w: number };
+  type Burst = { title: string; summary?: string; sev: Sev; count: number; t0: number; sparks: Spark[] };
+  let burst: Burst | null = null;
+  const queue: Omit<Burst, 't0' | 'sparks'>[] = [];
+  const DURATION = 5;
+
+  const now = () => performance.now() / 1000;
+
+  function apply(msgs: Msg[], interactive = true) {
+    for (const m of msgs) {
+      if (m.k === 'value') {
+        const x = st[m.slot];
+        if (m.replace) x.history = [...m.values];
+        else x.history.push(...m.values);
+        x.history = x.history.slice(-cfg[m.slot].history);
+        if (m.values.length || m.replace) { x.label = m.label; x.health = m.health; }
+        else { if (m.label !== undefined) x.label = m.label; if (m.health) x.health = m.health; }
+        x.beat = now();
+      } else if (m.k === 'ping') {
+        const color = parseColor(m.color) ?? C.crit;
+        comet = { t0: now(), color, reverse: m.slot === 'right' };
+        for (const s of m.slot ? [m.slot] : (['left', 'right'] as Slot[])) { st[s].ping = now(); st[s].pingColor = color; }
+      } else {
+        const a = { title: m.title, summary: m.summary, sev: m.severity, count: m.count };
+        if (burst && burst.title === a.title) burst.count += a.count;
+        else if (burst) {
+          const q = queue.find((x) => x.title === a.title);
+          q ? (q.count += a.count) : queue.push(a);
+        } else show(a);
+      }
+    }
+    if (interactive) userTouched = now();
+  }
+
+  function show(a: Omit<Burst, 't0' | 'sparks'>) {
+    const sparks: Spark[] = Array.from({ length: 70 }, () => {
+      const u = Math.random() * 2 - 1;
+      return { u, a: Math.PI / 2 - u + (Math.random() - 0.5) * 0.9, v: 110 + Math.random() * 310,
+               born: 0.12 + Math.random() * 0.1, life: 0.55 + Math.random() * 0.7, w: 1.1 + Math.random() * 1.1 };
+    });
+    burst = { ...a, t0: now(), sparks };
+  }
+
+  // ---------- drawing ----------
+  const canvas = document.getElementById('notch') as HTMLCanvasElement;
+  const ctx = canvas.getContext('2d')!;
+  const NW = 185, NH = 32, WING = 64, EAR = 8, EXTRA = 36, BANNER = 44;
+  const IDLE_W = NW + 2 * WING + 2 * EAR;
+  const PAD = 60; // room for sparks and glow
+  let scale = 2, W = 0, H = 0;
+
+  function resize() {
+    const screen = canvas.parentElement!;
+    const box = screen.clientWidth;
+    scale = Math.min(2, Math.max(1, (box - 24) / (IDLE_W + 2 * EXTRA + 40)));
+    W = box; H = Math.max(screen.clientHeight, (NH + BANNER + PAD) * scale);
+    screen.style.setProperty('--menubar', NH * scale + 'px');
+    screen.style.setProperty('--reserve', (NH + BANNER + 26) * scale + 'px');
+    const dpr = devicePixelRatio || 1;
+    canvas.width = W * dpr; canvas.height = H * dpr;
+    canvas.style.height = H + 'px';
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+  new ResizeObserver(resize).observe(canvas.parentElement!);
+  resize();
+
+  function notchPath(x: number, y: number, w: number, h: number, top: number, bottom: number, closed = true) {
+    const p = new Path2D();
+    p.moveTo(x, y);
+    p.quadraticCurveTo(x + top, y, x + top, y + top);
+    p.lineTo(x + top, y + h - bottom);
+    p.quadraticCurveTo(x + top, y + h, x + top + bottom, y + h);
+    p.lineTo(x + w - top - bottom, y + h);
+    p.quadraticCurveTo(x + w - top, y + h, x + w - top, y + h - bottom);
+    p.lineTo(x + w - top, y + top);
+    p.quadraticCurveTo(x + w - top, y, x + w, y);
+    if (closed) p.closePath();
+    return p;
+  }
+
+  // Sampled polyline of the same outline, for the comet (Path2D has no trim).
+  function outline(w: number, h: number, top: number, bottom: number): [number, number][] {
+    const pts: [number, number][] = [];
+    const q = (p0: number[], c: number[], p1: number[]) => {
+      for (let i = 1; i <= 12; i++) {
+        const t = i / 12, u = 1 - t;
+        pts.push([u * u * p0[0] + 2 * u * t * c[0] + t * t * p1[0], u * u * p0[1] + 2 * u * t * c[1] + t * t * p1[1]]);
+      }
+    };
+    pts.push([0, 0]);
+    q([0, 0], [top, 0], [top, top]);
+    pts.push([top, h - bottom]);
+    q([top, h - bottom], [top, h], [top + bottom, h]);
+    pts.push([w - top - bottom, h]);
+    q([w - top - bottom, h], [w - top, h], [w - top, h - bottom]);
+    pts.push([w - top, top]);
+    q([w - top, top], [w - top, 0], [w, 0]);
+    return pts;
+  }
+  function measure(pts: [number, number][]) {
+    const acc = [0];
+    for (let i = 1; i < pts.length; i++) acc.push(acc[i - 1] + Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]));
+    return acc;
+  }
+  function at(pts: [number, number][], acc: number[], f: number): [number, number] {
+    const d = Math.min(Math.max(f, 0), 1) * acc.at(-1)!;
+    let i = 1;
+    while (i < acc.length - 1 && acc[i] < d) i++;
+    const k = (d - acc[i - 1]) / (acc[i] - acc[i - 1] || 1);
+    return [pts[i - 1][0] + k * (pts[i][0] - pts[i - 1][0]), pts[i - 1][1] + k * (pts[i][1] - pts[i - 1][1])];
+  }
+
+  // Analytic damped spring step response, like SwiftUI's .spring(response:dampingFraction:).
+  function spring(t: number, response: number, damping: number) {
+    if (t <= 0) return 0;
+    const w0 = (2 * Math.PI) / response;
+    if (damping >= 1) return 1 - Math.exp(-w0 * t) * (1 + w0 * t);
+    const wd = w0 * Math.sqrt(1 - damping * damping);
+    return 1 - Math.exp(-damping * w0 * t) * (Math.cos(wd * t) + ((damping * w0) / wd) * Math.sin(wd * t));
+  }
+  const clamp01 = (x: number) => Math.min(Math.max(x, 0), 1);
+  const easeOut = (x: number) => 1 - Math.pow(1 - clamp01(x), 3);
+  const easeInOut = (x: number) => (x < 0.5 ? 2 * x * x : 1 - Math.pow(-2 * x + 2, 2) / 2);
+  const glow = (t: number) => {
+    const flash = t < 0.12 ? t / 0.12 : 0.45 + 0.55 * Math.exp(-(t - 0.12) * 5);
+    const pulse = 0.14 * Math.sin(2 * Math.PI * 1.2 * t) * clamp01((t - 0.6) / 0.4);
+    return Math.max(0, flash + pulse) * clamp01((DURATION - t) / 0.6);
+  };
+  const shake = (t: number) => { const s = t - 0.14; return s > 0 ? 7 * Math.exp(-s * 7) * Math.sin(2 * Math.PI * 8 * s) : 0; };
+  const pop = (t: number) => { const s = t - 0.14; return s < 0 ? 0.3 + 0.7 * clamp01(t / 0.14) : 1 + 0.5 * Math.exp(-s * 8) * Math.cos(2 * Math.PI * 2.6 * s); };
+
+  function hexA(hex: string, a: number) {
+    const n = parseInt(hex.slice(1), 16);
+    return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`;
+  }
+
+  // mode transitions: track spring progress between idle and burst sizes
+  let open = 0, openFrom = 0, openTo = 0, openT0 = 0, openResp = 0.32, openDamp = 1;
+  function setOpen(target: number, t: number) {
+    if (target === openTo) return;
+    openFrom = open; openTo = target; openT0 = t;
+    [openResp, openDamp] = target ? [0.42, 0.55] : [0.32, 1];
+  }
+
+  function drawLine(x: number, y: number, w: number, h: number, s: Slot, color: string) {
+    const v = st[s].history, c = cfg[s];
+    if (v.length < 2) return;
+    const lo = Math.min(0, ...v), hi = Math.max(...v, c.warn * 1.15);
+    const px = (i: number) => x + ((w - 6) * i) / (v.length - 1);
+    const py = (val: number) => y + h - ((val - lo) / (hi - lo)) * h;
+    ctx.beginPath();
+    v.forEach((val, i) => (i ? ctx.lineTo(px(i), py(val)) : ctx.moveTo(px(i), py(val))));
+    const g = ctx.createLinearGradient(0, y, 0, y + h);
+    g.addColorStop(0, hexA(color, 0.35)); g.addColorStop(1, hexA(color, 0));
+    ctx.save();
+    ctx.lineTo(px(v.length - 1), y + h); ctx.lineTo(px(0), y + h); ctx.closePath();
+    ctx.fillStyle = g; ctx.fill();
+    ctx.restore();
+    ctx.beginPath();
+    v.forEach((val, i) => (i ? ctx.lineTo(px(i), py(val)) : ctx.moveTo(px(i), py(val))));
+    ctx.strokeStyle = color; ctx.lineWidth = 1.6; ctx.lineJoin = ctx.lineCap = 'round'; ctx.stroke();
+    const crit = healthOf(s) === 'crit';
+    const breathe = crit ? 0.5 + 0.5 * Math.sin(now() * Math.PI * 1.25) : 0;
+    ctx.save();
+    ctx.shadowColor = color; ctx.shadowBlur = (crit ? 2 + 4 * breathe : 3) * scale;
+    ctx.beginPath(); ctx.arc(x + w - 3, py(v.at(-1)!), 3 * (1 + 0.5 * breathe), 0, 7);
+    ctx.fillStyle = color; ctx.fill();
+    ctx.restore();
+  }
+
+  function fmt(v: number | undefined, unit: string) {
+    if (v === undefined || !isFinite(v)) return '–';
+    if (unit === '%') return v < 1 ? v.toFixed(2) + '%' : v.toFixed(1) + '%';
+    const a = Math.abs(v);
+    const s = a >= 100 ? v.toFixed(0) : a >= 10 ? v.toFixed(1) : v.toFixed(2);
+    return unit ? s + (unit.startsWith('/') ? '' : ' ') + unit : s;
+  }
+
+  function drawGauge(x: number, y: number, w: number, h: number, s: Slot, color: string) {
+    const c = cfg.right, v = st[s].history.at(-1);
+    const r = (h - 2.5) / 2, cx = x + r + 1.25, cy = y + h / 2;
+    const start = (135 * Math.PI) / 180, sweep = 0.75 * Math.PI * 2;
+    const frac = (val: number) => clamp01(val / c.max) * sweep;
+    ctx.lineCap = 'round'; ctx.lineWidth = 2.5;
+    ctx.beginPath(); ctx.arc(cx, cy, r, start, start + sweep); ctx.strokeStyle = 'rgba(255,255,255,.14)'; ctx.stroke();
+    if (v !== undefined) {
+      ctx.save();
+      ctx.shadowColor = hexA(color, healthOf(s) === 'crit' ? 0.9 : 0.5); ctx.shadowBlur = (healthOf(s) === 'crit' ? 4 : 2) * scale;
+      ctx.beginPath(); ctx.arc(cx, cy, r, start, start + Math.max(frac(v), 0.06)); ctx.strokeStyle = color; ctx.stroke();
+      ctx.restore();
+    }
+    ctx.lineCap = 'butt'; ctx.lineWidth = 4.5;
+    for (const [t, col] of [[c.warn, C.warn], [c.crit, C.crit]] as const) {
+      ctx.beginPath(); ctx.arc(cx, cy, r, start + frac(t) - 0.05, start + frac(t) + 0.05); ctx.strokeStyle = hexA(col, 0.9); ctx.stroke();
+    }
+    ctx.fillStyle = color;
+    ctx.textBaseline = 'middle';
+    let text = st[s].label ?? fmt(v, c.unit);
+    const room = x + w - (cx + r + 5);
+    // like SwiftUI's minimumScaleFactor(0.6), then truncate
+    let size = 9;
+    const font = () => (ctx.font = `600 ${size}px ui-rounded, -apple-system, system-ui, sans-serif`);
+    font();
+    while (ctx.measureText(text).width > room && size > 5.4) { size -= 0.3; font(); }
+    while (ctx.measureText(text).width > room && text.length > 2) text = text.slice(0, -2) + '…';
+    ctx.fillText(text, cx + r + 5, cy + 0.5);
+  }
+
+  function roundRect(x: number, y: number, w: number, h: number, r: number) {
+    ctx.beginPath(); ctx.roundRect(x, y, w, h, r);
+  }
+
+  function frame() {
+    const t = now();
+    ctx.clearRect(0, 0, W, H);
+    ctx.save();
+    const idleW = IDLE_W;
+    const cx = W / 2;
+    ctx.translate(cx, 0);
+    ctx.scale(scale, scale);
+
+    // burst lifecycle
+    let bt = 0;
+    if (burst) {
+      bt = t - burst.t0;
+      if (bt > DURATION) {
+        burst = null;
+        const next = queue.shift();
+        if (next) { show(next); bt = 0; }
+      }
+    }
+    setOpen(burst ? 1 : 0, t);
+    open = openFrom + (openTo - openFrom) * spring(t - openT0, openResp, openDamp);
+    const w = idleW + 2 * EXTRA * open;
+    const h = NH + BANNER * open;
+    const bottom = 12 + 6 * open;
+    const g = burst ? glow(bt) : 0;
+    const tint = burst ? (burst.sev === 'info' ? C.info : burst.sev === 'warn' ? C.warn : C.crit) : C.crit;
+
+    const x0 = -w / 2;
+    const shape = notchPath(x0, 0, w, Math.max(h, NH), EAR, bottom);
+
+    ctx.save();
+    if (g > 0) { ctx.shadowColor = hexA(tint, 0.85 * g); ctx.shadowBlur = 16 * scale; }
+    ctx.fillStyle = '#000';
+    ctx.fill(shape);
+    ctx.restore();
+
+    ctx.save();
+    ctx.clip(shape);
+    if (g > 0) {
+      const rg = ctx.createRadialGradient(0, h, 0, 0, h, w * 0.45);
+      rg.addColorStop(0, hexA(tint, 0.32 * g)); rg.addColorStop(1, hexA(tint, 0));
+      ctx.fillStyle = rg; ctx.fillRect(x0, 0, w, h);
+    }
+
+    // wings
+    for (const s of ['left', 'right'] as Slot[]) {
+      const hl = healthOf(s);
+      const color = C[hl];
+      const wx = s === 'left' ? -NW / 2 - WING : NW / 2;
+      ctx.save();
+      const bk = t - st[s].beat;
+      const blink = bk < 0.08 ? bk / 0.08 : bk < 0.5 ? 1 - (bk - 0.08) / 0.42 : 0;
+      const pk = t - st[s].ping;
+      const pulse = pk < 0 || pk > 1.14 ? 0
+        : pk < 0.12 ? pk / 0.12 : pk < 0.42 ? 1 - 0.85 * ((pk - 0.12) / 0.3) : pk < 0.54 ? 0.15 + 0.85 * ((pk - 0.42) / 0.12) : 1 - (pk - 0.54) / 0.6;
+      ctx.filter = `brightness(${1 + 0.45 * blink + 0.25 * pulse})${pulse > 0 ? ` drop-shadow(0 0 ${5 * pulse * scale}px ${hexA(st[s].pingColor, pulse)})` : ''}`;
+      if (s === 'left') drawLine(wx + 8, 9, WING - 16, NH - 18, s, color);
+      else drawGauge(wx + 6, 7, WING - 12, NH - 14, s, color);
+      ctx.restore();
+    }
+
+    // banner
+    if (burst && open > 0.05) {
+      const reveal = easeOut((bt - 0.1) / 0.35);
+      const by = NH + (BANNER - 6) / 2;
+      ctx.save();
+      ctx.translate(shake(bt), 0);
+      const left = x0 + EAR + 24;
+      // icon
+      ctx.save();
+      ctx.translate(left + 8, by);
+      ctx.scale(pop(bt), pop(bt));
+      ctx.shadowColor = tint; ctx.shadowBlur = (2 + 6 * g) * scale;
+      ctx.fillStyle = tint;
+      if (burst.sev === 'info') {
+        ctx.beginPath(); ctx.arc(0, 0, 7.5, 0, 7); ctx.fill();
+        ctx.fillStyle = '#000'; ctx.fillRect(-1.1, -1.5, 2.2, 6); ctx.beginPath(); ctx.arc(0, -3.8, 1.3, 0, 7); ctx.fill();
+      } else {
+        ctx.beginPath(); ctx.moveTo(0, -7.5); ctx.lineTo(8, 6.5); ctx.lineTo(-8, 6.5); ctx.closePath();
+        ctx.lineJoin = 'round'; ctx.lineWidth = 2; ctx.strokeStyle = tint; ctx.stroke(); ctx.fill();
+        ctx.fillStyle = '#000'; ctx.fillRect(-1, -3, 2, 5.2); ctx.fillRect(-1, 3.4, 2, 1.8);
+      }
+      ctx.restore();
+      // text
+      ctx.globalAlpha = reveal;
+      ctx.filter = reveal < 1 ? `blur(${(1 - reveal) * 6 * scale}px)` : 'none';
+      const tx = left + 25, ty = by + (1 - reveal) * -6;
+      const maxW = w - 2 * EAR - 48 - 25 - 44;
+      const fit = (s: string) => { while (ctx.measureText(s).width > maxW && s.length > 3) s = s.slice(0, -2) + '…'; return s; };
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle = '#fff';
+      ctx.font = `700 12.5px ui-rounded, -apple-system, system-ui, sans-serif`;
+      ctx.fillText(fit(burst.title), tx, burst.summary ? ty - 7 : ty);
+      if (burst.summary) {
+        ctx.fillStyle = 'rgba(235,235,245,.6)';
+        ctx.font = `400 10px -apple-system, system-ui, sans-serif`;
+        ctx.fillText(fit(burst.summary), tx, ty + 8);
+      }
+      ctx.filter = 'none';
+      // badge
+      const badge = burst.count > 1 ? `×${burst.count}` : 'NEW';
+      ctx.font = `800 9px -apple-system, system-ui, sans-serif`;
+      const bw = ctx.measureText(badge).width + 12;
+      const bx = -x0 - EAR - 24 - bw;
+      roundRect(bx, by - 7, bw, 14, 7); ctx.fillStyle = hexA(tint, 0.22); ctx.fill();
+      ctx.fillStyle = tint; ctx.textAlign = 'center'; ctx.fillText(badge, bx + bw / 2, by + 0.5); ctx.textAlign = 'left';
+      // countdown
+      const cw = Math.max(0, (w - 80) * (1 - clamp01(bt / DURATION)));
+      roundRect(-cw / 2, NH + BANNER - 8, cw, 2, 1); ctx.fillStyle = hexA(tint, 0.55); ctx.fill();
+      ctx.restore();
+    }
+    ctx.restore(); // clip
+
+    // rim
+    if (g > 0) {
+      ctx.save();
+      const rim = notchPath(x0, 0, w, h, EAR, bottom, false);
+      const lg = ctx.createLinearGradient(x0, 0, -x0, 0);
+      const ph = (bt * 0.6) % 1;
+      [0, 0.5, 1].forEach((k) => lg.addColorStop(k, hexA(RAMP[burst!.sev][Math.round(((k + ph) % 1) * 2)], 1)));
+      ctx.globalAlpha = g; ctx.lineWidth = 3; ctx.strokeStyle = lg; ctx.shadowColor = tint; ctx.shadowBlur = 6 * scale;
+      ctx.stroke(rim);
+      ctx.restore();
+    }
+
+    // sparks
+    if (burst) {
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      for (const sp of burst.sparks) {
+        const a = bt - sp.born;
+        if (a < 0 || a > sp.life) continue;
+        const k = a / sp.life;
+        const sx = sp.u * (w / 2 - 14), sy = h - 2;
+        const vx = Math.cos(sp.a) * sp.v, vy = Math.sin(sp.a) * sp.v;
+        const px = sx + vx * a * 0.55, py = sy + vy * a * 0.55 + 260 * a * a;
+        const tx = px - vx * 0.03, ty = py - (vy + 520 * a) * 0.03;
+        const col = RAMP[burst.sev][Math.min(2, Math.floor(k * 3))];
+        ctx.strokeStyle = hexA(col, 1 - k); ctx.lineWidth = sp.w * (1 - k * 0.5); ctx.lineCap = 'round';
+        ctx.beginPath(); ctx.moveTo(tx, ty); ctx.lineTo(px, py); ctx.stroke();
+      }
+      ctx.restore();
+    }
+
+    // comet
+    if (comet) {
+      const p = (t - comet.t0) / 0.4;
+      if (p >= 1.3) comet = null;
+      else {
+        const e = easeInOut(clamp01(p));
+        const d = 3;
+        const pts = outline(w + 2 * d, h + d, EAR - d, bottom + d).map(([a, b]) => [a + x0 - d, b] as [number, number]);
+        const acc = measure(pts);
+        const f = (u: number) => (comet!.reverse ? 1 - u : u);
+        const head = e * 1.3;
+        ctx.save();
+        ctx.shadowColor = comet.color; ctx.shadowBlur = 3 * scale; ctx.lineCap = 'butt';
+        for (let i = 0; i < 16; i++) {
+          const k = 1 - i / 16;
+          const a = clamp01(head - (0.3 * (i + 1)) / 16), b = clamp01(head);
+          if (b <= a) continue;
+          ctx.beginPath();
+          for (let s = 0; s <= 10; s++) { const [px, py] = at(pts, acc, f(a + ((b - a) * s) / 10)); s ? ctx.lineTo(px, py) : ctx.moveTo(px, py); }
+          ctx.strokeStyle = hexA(comet.color, 0.22); ctx.lineWidth = 0.6 + 2.2 * k; ctx.stroke();
+        }
+        if (head <= 1) {
+          const [hx, hy] = at(pts, acc, f(head));
+          ctx.fillStyle = comet.color; ctx.beginPath(); ctx.arc(hx, hy, 2.5, 0, 7); ctx.fill();
+          ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(hx, hy, 1.2, 0, 7); ctx.fill();
+        }
+        ctx.restore();
+      }
+    }
+
+    ctx.restore();
+    requestAnimationFrame(frame);
+  }
+
+  // ---------- autoplay: a gentle random walk until someone types ----------
+  let userTouched = -1e9;
+  let tick = 0;
+  setInterval(() => {
+    if (document.hidden) return;
+    tick++;
+    const idle = now() - userTouched > 12;
+    const l = st.left.history.at(-1) ?? 4, r = st.right.history.at(-1) ?? 55;
+    const nl = Math.max(0.5, l + (Math.random() - 0.48) * 1.1 + (tick % 14 === 9 ? 3.8 : 0) - (l > 8 ? 1.6 : 0));
+    const nr = Math.min(98, Math.max(20, r + (Math.random() - 0.5) * 5 + (r < 40 ? 3 : 0) - (r > 85 ? 6 : 0)));
+    const msgs: Msg[] = [{ k: 'value', slot: 'left', values: [nl], replace: false }];
+    if (tick % 2 === 0) msgs.push({ k: 'value', slot: 'right', values: [nr], replace: false });
+    if (idle && tick % 14 === 9) msgs.push({ k: 'ping', slot: 'left' });
+    if (idle && tick % 21 === 4) msgs.push({ k: 'ping', slot: 'right', color: 'info' });
+    if (idle && tick % 28 === 16) msgs.push({ k: 'alert', title: 'Deploy failed', summary: 'api-gateway · rollout stuck', severity: 'crit', count: 1 });
+    apply(msgs, false);
+  }, 1000);
+
+  // ---------- console ----------
+  const msg = document.getElementById('msg') as HTMLTextAreaElement;
+  const reply = document.getElementById('reply')!;
+  function send() {
+    const lines = msg.value.trim();
+    let out: string;
+    try {
+      const m = parse(lines);
+      apply(m);
+      out = m.map(() => 'ok').join('\n') || 'ok';
+      reply.dataset.state = 'ok';
+    } catch (e: any) {
+      out = 'error: ' + (e instanceof PErr ? e.message : String(e));
+      reply.dataset.state = 'err';
+    }
+    reply.textContent = out;
+  }
+  document.getElementById('send')!.addEventListener('submit', (e) => { e.preventDefault(); send(); });
+  msg.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } });
+  document.querySelectorAll<HTMLButtonElement>('.chip').forEach((b) =>
+    b.addEventListener('click', () => { msg.value = b.dataset.json!; send(); }));
+
+  requestAnimationFrame(frame);
+</script>
+
+<style>
+  .pg {
+    display: grid;
+    gap: 1.25rem;
+    margin-block: 2rem 3rem;
+  }
+  .screen {
+    position: relative;
+    border-radius: 18px;
+    overflow: hidden;
+    padding: var(--reserve, 10rem) clamp(0.75rem, 5%, 3rem) 2.5rem;
+    background:
+      radial-gradient(120% 90% at 20% 0%, #3b2a6b 0%, transparent 55%),
+      radial-gradient(120% 90% at 85% 10%, #0f4b5c 0%, transparent 55%),
+      radial-gradient(100% 120% at 50% 120%, #6b2340 0%, transparent 60%),
+      #0b0b12;
+    box-shadow: 0 30px 80px -30px rgb(0 0 0 / 0.8), 0 0 0 1px rgb(255 255 255 / 0.07);
+  }
+  .menubar {
+    position: absolute;
+    inset: 0 0 auto 0;
+    height: var(--menubar, 2.2rem);
+    display: flex;
+    align-items: center;
+    gap: 1.1rem;
+    padding-inline: 1.1rem;
+    font: 500 0.85rem/1 -apple-system, system-ui, sans-serif;
+    color: rgb(255 255 255 / 0.88);
+    background: rgb(20 20 28 / 0.35);
+    backdrop-filter: blur(20px);
+  }
+  .menubar .apple { width: 0.8rem; height: 0.8rem; border-radius: 50% 50% 45% 45%; background: currentColor; }
+  .menubar .right { margin-left: auto; }
+  @media (max-width: 60rem) { .menubar span:not(.apple):not(.right), .menubar b { display: none; } }
+  @media (max-width: 34rem) { .menubar { display: none; } .screen { padding-inline: 0.6rem; } }
+  canvas { position: absolute; inset: 0 0 auto 0; width: 100%; pointer-events: none; z-index: 2; }
+
+  .console {
+    position: relative;
+    max-width: 46rem;
+    margin-inline: auto;
+    border-radius: 12px;
+    background: rgb(13 13 16 / 0.92);
+    backdrop-filter: blur(24px);
+    box-shadow: 0 24px 60px -12px rgb(0 0 0 / 0.7), 0 0 0 1px rgb(255 255 255 / 0.1);
+    font-family: var(--sl-font-mono);
+    font-size: 0.85rem;
+    color: #e5e5ea;
+    overflow: hidden;
+  }
+  .bar { display: flex; align-items: center; gap: 0.45rem; padding: 0.6rem 0.9rem; background: #18181c; }
+  .dot { width: 0.7rem; height: 0.7rem; border-radius: 50%; background: var(--c); }
+  .title { margin-left: 0.6rem; color: #8e8e93; font-size: 0.75rem; }
+  .chips { display: flex; flex-wrap: wrap; gap: 0.4rem; padding: 0.8rem 0.9rem 0.2rem; }
+  .chip {
+    font: inherit;
+    font-size: 0.75rem;
+    padding: 0.25rem 0.7rem;
+    border-radius: 99px;
+    border: 1px solid rgb(255 255 255 / 0.12);
+    background: rgb(255 255 255 / 0.04);
+    color: #d1d1d6;
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s, color 0.15s;
+  }
+  .chip:hover { background: rgb(48 209 88 / 0.14); border-color: rgb(48 209 88 / 0.5); color: #fff; }
+  form { display: flex; align-items: flex-start; gap: 0.6rem; padding: 0.6rem 0.9rem; }
+  .prompt { color: #30d158; line-height: 1.5; }
+  textarea {
+    flex: 1;
+    font: inherit;
+    line-height: 1.5;
+    background: transparent;
+    color: #f5f5f7;
+    border: none;
+    resize: vertical;
+    outline: none;
+    min-height: 1.5em;
+  }
+  .go {
+    font: inherit;
+    font-size: 0.75rem;
+    padding: 0.3rem 0.8rem;
+    border-radius: 8px;
+    border: none;
+    background: #30d158;
+    color: #04150a;
+    font-weight: 700;
+    cursor: pointer;
+  }
+  .go:hover { filter: brightness(1.1); }
+  #reply { white-space: pre-wrap; word-break: break-word; margin: 0; padding: 0 0.9rem 0.8rem 2.2rem; min-height: 1.4em; background: none; border: none; color: #8e8e93; font-size: 0.8rem; }
+  #reply[data-state='ok'] { color: #30d158; }
+  #reply[data-state='err'] { color: #ff453b; }
+</style>

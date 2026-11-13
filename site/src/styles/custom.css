@@ -1,0 +1,84 @@
+/* polso palette: the app's health colors (Model.swift) on near-black. */
+:root {
+  --p-ok: #30d158;
+  --p-warn: #ffc70a;
+  --p-crit: #ff453b;
+  --p-info: #59adff;
+  --p-ink: #050506;
+
+  --sl-font: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', system-ui, sans-serif;
+  --sl-font-mono: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, monospace;
+  --p-display: ui-rounded, 'SF Pro Rounded', -apple-system, system-ui, sans-serif;
+
+  --sl-color-accent-low: #0d2a16;
+  --sl-color-accent: #30d158;
+  --sl-color-accent-high: #b8f5c8;
+  --sl-color-white: #f5f5f7;
+  --sl-color-gray-1: #e5e5ea;
+  --sl-color-gray-2: #c7c7cc;
+  --sl-color-gray-3: #98989f;
+  --sl-color-gray-4: #5a5a60;
+  --sl-color-gray-5: #2c2c30;
+  --sl-color-gray-6: #18181b;
+  --sl-color-black: #0a0a0c;
+}
+
+:root[data-theme='light'] {
+  --sl-color-accent-low: #d4f7de;
+  --sl-color-accent: #128a35;
+  --sl-color-accent-high: #0a4a1d;
+  --sl-color-white: #111114;
+  --sl-color-gray-1: #232327;
+  --sl-color-gray-2: #3a3a40;
+  --sl-color-gray-3: #6b6b72;
+  --sl-color-gray-4: #a0a0a8;
+  --sl-color-gray-5: #d8d8de;
+  --sl-color-gray-6: #f0f0f3;
+  --sl-color-gray-7: #f8f8fa;
+  --sl-color-black: #ffffff;
+}
+
+h1, h2, h3, .site-title, .hero h1 {
+  font-family: var(--p-display);
+  letter-spacing: -0.02em;
+}
+
+.site-title img { height: 1.6rem; }
+
+/* tables read as data, not prose */
+.sl-markdown-content table { font-size: var(--sl-text-sm); }
+.sl-markdown-content table code { white-space: nowrap; }
+
+/* inline media */
+.p-media {
+  display: block;
+  margin-inline: auto;
+  max-width: 100%;
+  border-radius: 14px;
+  box-shadow: 0 20px 60px -20px rgb(0 0 0 / 0.6), 0 0 0 1px rgb(255 255 255 / 0.06);
+}
+
+.p-swatch {
+  display: inline-block;
+  width: 0.7em;
+  height: 0.7em;
+  border-radius: 50%;
+  margin-inline-end: 0.35em;
+  vertical-align: baseline;
+  box-shadow: 0 0 6px currentColor;
+  background: currentColor;
+}
+
+/* landing */
+.p-grad {
+  background: linear-gradient(90deg, var(--p-ok), var(--p-warn) 55%, var(--p-crit));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+[data-has-hero] .hero { padding-bottom: 0; }
+[data-has-hero] .hero h1 { font-size: clamp(2.6rem, 6vw, 4.2rem); line-height: 1.05; }
+[data-has-hero] .hero .tagline { max-width: 40rem; }
+.p-actions { display: flex; flex-wrap: wrap; gap: 0.75rem 1rem; align-items: center; }
+.p-hint { text-align: center; color: var(--sl-color-gray-3); font-size: var(--sl-text-sm); margin-top: -1.5rem !important; }
+.sl-markdown-content :is(h2, h3) code { background: none; padding: 0; font-size: 0.9em; color: var(--sl-color-accent-high); }

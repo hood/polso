@@ -1,0 +1,179 @@
+---
+title: Socket protocol
+description: Newline-delimited JSON over a unix socket. Every message type, every field, and clients in five languages.
+---
+
+import { Tabs, TabItem, Aside } from '@astrojs/starlight/components';
+
+polso listens on `~/.config/polso/sock` (change it with `socket` in the config). The socket is mode `600`, so only
+your user can write to it. No ports, no auth, no HTTP.
+
+- Send one JSON message per line. A line can also be a JSON array (a batch).
+- Each line gets exactly one reply line: `ok` or `error: <why>`.
+- Keep the connection open and stream, or connect per message. Both work.
+
+```sh
+$ echo '{"type":"value","slot":"left","value":42}' | nc -U ~/.config/polso/sock
+ok
+$ echo '{"type":"value","slot":"middle","value":42}' | nc -U ~/.config/polso/sock
+error: value: slot must be "left" or "right"
+```
+
+## `value`
+
+Feeds a wing.
+
+| field | type | |
+|---|---|---|
+| `slot` | `"left"` \| `"right"` | required |
+| `value` | number | appended to the history |
+| `values` | number[] | **replaces** the whole history (backfill a sparkline in one go) |
+| `label` | string | text shown instead of the formatted number (gauge, panel) |
+| `health` | `ok` \| `warn` \| `crit` \| `unknown` | overrides the threshold-based color |
+
+At least one of `value`, `values`, `label`, `health` is needed. `type` can be omitted when `value` or `values` is
+present. A message with a number resets `label` and `health`. A message with only `label` or `health` patches
+them and leaves the history alone.
+
+```json
+{"type":"value","slot":"left","value":42}
+{"slot":"right","values":[3,4,8,6,5]}
+{"type":"value","slot":"right","value":3,"label":"3 jobs","health":"warn"}
+{"type":"value","slot":"right","health":"crit"}
+```
+
+## `ping`
+
+| field | type | |
+|---|---|---|
+| `slot` | `"left"` \| `"right"` | optional, omitted = whole notch |
+| `color` | string | `ok` `warn` `crit` `info`, `red` `orange` `yellow` `green` `mint` `teal` `cyan` `blue` `indigo` `purple` `pink` `white`, or `#rgb`/`#rrggbb`. Default: `ping.color` (crit) |
+
+```json
+{"type":"ping"}
+{"type":"ping","slot":"left","color":"#ff4433"}
+```
+
+## `alert`
+
+| field | type | |
+|---|---|---|
+| `title` | string | required |
+| `summary` | string | second line |
+| `severity` | `info` \| `warn` \| `crit` | default `crit` |
+| `count` | integer | starts the `×N` counter |
+| `url` | string | opened when the alert is clicked in the panel log |
+
+```json
+{"type":"alert","title":"Deploy failed","summary":"api-gateway · rollout stuck","severity":"crit","url":"https://ci.example.com/runs/812"}
+```
+
+## Batches and leniency
+
+```json
+[{"type":"value","slot":"left","value":9.1},{"type":"ping","slot":"left"},{"type":"alert","title":"Load spike","severity":"warn"}]
+```
+
+A batch is validated as a whole, then applied in order, with a single `ok`. Numeric strings count as numbers
+(`"value":"42"`), since shell senders tend to quote everything.
+
+## Clients
+
+<Tabs syncKey="lang">
+<TabItem label="shell">
+
+```sh
+sock=~/.config/polso/sock
+polso() { printf '%s\n' "$1" | nc -U "$sock"; }
+
+polso '{"type":"value","slot":"left","value":'"$(sysctl -n vm.loadavg | awk '{print $2}')"'}'
+
+# long-running: one connection, many lines
+while sleep 1; do echo "{\"slot\":\"left\",\"value\":$RANDOM}"; done | nc -U "$sock"
+```
+
+</TabItem>
+<TabItem label="Python">
+
+```python
+import json, os, socket
+
+def polso(*msgs):
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
+        s.connect(os.path.expanduser("~/.config/polso/sock"))
+        s.sendall(json.dumps(list(msgs)).encode() + b"\n")
+        return s.recv(4096).decode().strip()
+
+polso({"type": "value", "slot": "left", "value": 42},
+      {"type": "ping", "slot": "left"})
+```
+
+</TabItem>
+<TabItem label="Node">
+
+```js
+import net from 'node:net';
+import os from 'node:os';
+
+export function polso(...msgs) {
+  return new Promise((resolve, reject) => {
+    const s = net.createConnection(`${os.homedir()}/.config/polso/sock`, () =>
+      s.write(JSON.stringify(msgs) + '\n'));
+    s.once('data', (d) => { resolve(d.toString().trim()); s.end(); });
+    s.once('error', reject);
+  });
+}
+
+await polso({ type: 'alert', title: 'Tests failed', summary: '3 of 812', severity: 'warn' });
+```
+
+</TabItem>
+<TabItem label="Go">
+
+```go
+func polso(msgs ...map[string]any) (string, error) {
+	home, _ := os.UserHomeDir()
+	c, err := net.Dial("unix", filepath.Join(home, ".config/polso/sock"))
+	if err != nil {
+		return "", err
+	}
+	defer c.Close()
+	b, _ := json.Marshal(msgs)
+	if _, err := c.Write(append(b, '\n')); err != nil {
+		return "", err
+	}
+	return bufio.NewReader(c).ReadString('\n')
+}
+```
+
+</TabItem>
+<TabItem label="Swift">
+
+```swift
+import Foundation
+
+func polso(_ line: String) throws {
+    let path = NSString(string: "~/.config/polso/sock").expandingTildeInPath
+    let fd = socket(AF_UNIX, SOCK_STREAM, 0)
+    defer { close(fd) }
+    var addr = sockaddr_un()
+    addr.sun_family = sa_family_t(AF_UNIX)
+    withUnsafeMutableBytes(of: &addr.sun_path) { dst in
+        path.utf8CString.withUnsafeBytes { dst.copyMemory(from: UnsafeRawBufferPointer(rebasing: $0.prefix(dst.count - 1))) }
+    }
+    let rc = withUnsafePointer(to: &addr) {
+        $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { connect(fd, $0, socklen_t(MemoryLayout<sockaddr_un>.size)) }
+    }
+    guard rc == 0 else { throw POSIXError(.ECONNREFUSED) }
+    let bytes = Array((line + "\n").utf8)
+    _ = write(fd, bytes, bytes.count)
+}
+```
+
+</TabItem>
+</Tabs>
+
+<Aside type="note" title="Not running?">
+If polso is down, `nc` fails with `Connection refused` or `No such file or directory`. Senders should treat the
+socket as fire-and-forget and not block on it.
+</Aside>

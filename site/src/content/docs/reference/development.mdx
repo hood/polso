@@ -1,0 +1,55 @@
+---
+title: Development
+description: Building, snapshots, the film renderer and the code layout.
+---
+
+```sh
+just dev        # build and run in the foreground, logs in the terminal
+just restart    # rebuild, reinstall ~/Applications/Polso.app, relaunch
+just snapshot   # render every state to ./snapshots as PNG
+just film       # re-render the clips in docs/media
+just bundle     # dist/Polso.app + dist/Polso.zip
+```
+
+Swift 5 language mode, SwiftUI, macOS 14+. No dependencies. Builds with
+`swift build -c release --build-system native`.
+
+## Layout
+
+| file | |
+|---|---|
+| `main.swift` | entry, `NotchPanel` (borderless panel above the menu bar), hover tracking, snapshots |
+| `Store.swift` | all live state: wings, pings, alert queue, log, config reload, poller |
+| `Messages.swift` | the wire protocol parser, shared by the socket and sources |
+| `SocketServer.swift` | POSIX unix socket, one reply per line, single-instance handoff |
+| `Sources.swift` | `exec`, `prometheus` and `scrape` pollers, exposition parser |
+| `Config.swift` | config schema, defaults, deep merge, validation |
+| `Notch.swift` | notch shape, idle wings, comet, spring transitions |
+| `Burst.swift` | alert banner, sparks, rim glow |
+| `Expanded.swift` | the hover panel |
+| `Settings.swift` | settings window |
+| `Indicators/` | `line`, `gauge`, `dots` and the `Indicator` protocol |
+| `Film.swift` | deterministic renderer for the docs clips |
+
+## Snapshots
+
+`just snapshot` renders idle wings for every indicator, comets, alert bursts at several times, the expanded panel
+and each settings tab with synthetic data. It's the fastest way to check a visual change, even on a Mac without
+a notch.
+
+## Film
+
+The clips on this site are rendered, not screen-recorded. `Film.swift` drives the real notch views frame by frame
+on a fixed timeline, using the same springs and keyframes as the live app, and writes PNG frames.
+`scripts/encode-film.sh` turns them into animated WebP and MP4. Needs `brew install ffmpeg webp`.
+
+## This site
+
+Astro + Starlight in `site/`. The landing page notch is a canvas port of the app (`site/src/components/Notch.astro`)
+running the same protocol parser.
+
+```sh
+cd site && pnpm install && pnpm dev
+```
+
+Pushes to `main` that touch `site/` or `docs/media/` deploy to GitHub Pages.
