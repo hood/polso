@@ -14,7 +14,6 @@ struct LineMeter: View {
         let values = input.state.history
         let floor = input.config.warn ?? 0
         let color = input.health.color
-        // The line stops one dot radius short of the edge, and the dot sits exactly on its last point.
         let inset: CGFloat = 3
         GeometryReader { geo in
             ZStack(alignment: .topLeading) {
@@ -25,7 +24,6 @@ struct LineMeter: View {
             }
         }
         .padding(.horizontal, 8)
-        // Just enough for the dot (radius 3) at the top and bottom of the range: the line gets the full wing height.
         .padding(.vertical, 4)
     }
 }

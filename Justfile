@@ -32,7 +32,7 @@ restart: install stop start
 start:
     open "{{app}}"
 
-# quit the running app and wait until it's gone (an immediate `open` would race it: error -609)
+# quit the running app
 stop:
     #!/usr/bin/env bash
     pkill -x Polso || exit 0

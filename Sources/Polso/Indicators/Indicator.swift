@@ -39,10 +39,8 @@ struct Dot: View {
     var body: some View {
         let dot = Circle().fill(color).frame(width: 6, height: 6)
         if pulsing {
-            // Clock-driven rather than phaseAnimator: its 0.8s ease also caught the dot's position, so a
-            // fast-moving value left the dot trailing below/above the tip of the line.
             TimelineView(.animation) { tl in
-                let on = (1 - cos(tl.date.timeIntervalSinceReferenceDate * .pi / 0.8)) / 2   // 0→1→0, 0.8s each way
+                let on = (1 - cos(tl.date.timeIntervalSinceReferenceDate * .pi / 0.8)) / 2
                 dot.shadow(color: color, radius: 2 + 4 * on).scaleEffect(1 + 0.5 * on)
             }
         } else {
