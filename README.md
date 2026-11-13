@@ -18,6 +18,8 @@ just alert "Deploy failed" crit   # banner
 just snapshot                     # render every state to ./snapshots
 ```
 
+The recipes need [just](https://github.com/casey/just): `brew install just`. `just` alone lists them all.
+
 ## Wings
 
 Each side of the notch is a meter with its own style, thresholds and units. Values blink in as they
