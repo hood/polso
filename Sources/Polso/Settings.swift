@@ -36,6 +36,7 @@ final class SettingsModel: ObservableObject {
         case .exec: s.command = "echo 42"
         case .prometheus: s.url = "http://localhost:9090"; s.query = "up"
         case .scrape: s.url = "http://localhost:9100/metrics"; s.metric = "node_load1"
+        case .http: s.url = "http://localhost:8080/health"; s.value = "body:status"
         }
         draft.sources.append(s)
         labelsText.append("")
@@ -292,8 +293,26 @@ struct SlotForm: View {
                 Text("`echo '{\"type\":\"value\",\"slot\":\"\(slot.rawValue)\",\"value\":42}' | nc -U \(socket)`")
                     .foregroundStyle(.secondary).textSelection(.enabled)
             }
+            Section {
+                Toggle("Entering warn", isOn: trigger("warn"))
+                Toggle("Entering crit", isOn: trigger("crit"))
+                Toggle("Label changes (e.g. a new version)", isOn: trigger("label"))
+            } header: {
+                Text("Alert on")
+            } footer: {
+                Text("Health alerts also fire an info alert on recovery. The first reading never alerts.")
+                    .foregroundStyle(.secondary)
+            }
         }
         .formStyle(.grouped)
+    }
+
+    private func trigger(_ t: String) -> Binding<Bool> {
+        Binding(get: { config.alertOn.contains(t) },
+                set: { on in
+                    config.alertOn.removeAll { $0 == t }
+                    if on { config.alertOn.append(t) }
+                })
     }
 }
 
@@ -356,6 +375,9 @@ struct SourcesForm: View {
             TextField("Label matchers", text: labels(i), prompt: Text("code=\"500\", method=\"GET\""))
             Toggle("Per-second rate (counters)", isOn: Binding(get: { s.wrappedValue.rate ?? false },
                                                               set: { s.wrappedValue.rate = $0 ? true : nil }))
+        case .http:
+            TextField("URL", text: opt(s.url))
+            TextField("Value", text: opt(s.value), prompt: Text("body:build.version or header:X-Version"))
         }
         HStack {
             if let r = m.results[i] {

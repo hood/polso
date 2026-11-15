@@ -6,7 +6,7 @@
 
 <p align="center">
   Your MacBook notch as a live meter for anything.<br>
-  Feed it numbers, pings and alerts from any script, or let it poll commands and Prometheus.<br>
+  Feed it numbers, pings and alerts from any script, or let it poll commands, Prometheus and health checks.<br>
   <a href="https://hood.github.io/polso/"><b>Docs and live demo →</b></a>
 </p>
 
@@ -59,17 +59,21 @@ A JSON array sends a batch. Numeric strings are accepted for numbers.
 {"kind": "prometheus", "slot": "right", "every": 15, "url": "http://prom:9090", "query": "sum(rate(http_requests_total[5m]))"}
 {"kind": "scrape", "slot": "right", "every": 15, "url": "http://localhost:9100/metrics",
  "metric": "http_requests_total", "labels": {"code": "500"}, "rate": true}
+{"kind": "http", "slot": "left", "every": 10, "url": "https://api.internal/health", "value": "body:build.version"}
 ```
 
 - `exec`: `sh -c`, stdout is a number (goes to `slot`) or protocol JSON (object, array or one per line), so a
   command can ping and alert too. Optional `timeout` (default 10s).
 - `prometheus`: PromQL instant query, first series. Backfills the sparkline with a range query on start.
 - `scrape`: Prometheus text exposition. Sums matching series; `rate: true` turns a counter into per-second.
+- `http`: GET `url`, read `value` (`body:<dot.path>`, `body:` or `header:<Name>`). 2xx is healthy, anything else is
+  `crit`. Numbers are samples, text becomes the wing's label.
 
 ## Config
 
-Deep-merged over defaults and hot-reloaded. Per wing: `title`, `indicator` (line/gauge/dots), `unit`,
-`warn`, `crit` (optional), `invert` (low is bad), `max` (gauge scale), `history`, `staleAfter`, `blink`.
+Deep-merged over defaults and hot-reloaded. Per wing: `title`, `indicator` (line/gauge/dots/status/pills/none),
+`unit`, `warn`, `crit` (optional), `invert` (low is bad), `max` (gauge scale), `history`, `staleAfter`, `blink`,
+`alertOn` (`warn`/`crit` on entering that level, `label` on label change, e.g. a deploy).
 Plus `ping` (comet, pulse, color, sound), `alert` (duration, sound, queue) and `expanded` (hover panel).
 
 ## README clips

@@ -71,6 +71,81 @@ func run(_ s: SourceConfig, _ state: inout SourceState, history: Int) async thro
         guard let prev = state.lastCounter, sum >= prev.value else { return [] }   // first poll or counter reset
         let dt = now.timeIntervalSince(prev.at)
         return dt > 0 ? [.value(slot, values: [(sum - prev.value) / dt], replace: false, label: nil, health: nil)] : []
+
+    case .http:
+        guard let slot = s.slot, let url = URL(string: s.url ?? ""), let field = HTTPField(s.value ?? "") else {
+            throw MessageError("bad url, value or no wing")
+        }
+        var req = URLRequest(url: url)
+        req.setValue("application/json, */*", forHTTPHeaderField: "Accept")
+        req.timeoutInterval = s.timeout ?? 10
+        let (data, resp) = try await session.data(for: req)
+        try check(resp, url)
+        // A number is a sample judged by the wing's thresholds; text becomes the label of a healthy reading.
+        switch try field.read(data, resp as? HTTPURLResponse) {
+        case let .number(n): return [.value(slot, values: [n], replace: false, label: nil, health: nil)]
+        case let .text(t): return [.value(slot, values: [], replace: false, label: t, health: .ok)]
+        }
+    }
+}
+
+// MARK: http
+
+/// Where an http source reads its value: `body:build.version` (dot path, numeric segments index arrays),
+/// `body:` (the whole body as text) or `header:X-Version`.
+enum HTTPField {
+    case body([String])
+    case header(String)
+
+    enum Reading: Equatable { case number(Double), text(String) }
+
+    init?(_ raw: String) {
+        let s = raw.trimmingCharacters(in: .whitespaces)
+        if s.hasPrefix("body:") {
+            self = .body(s.dropFirst(5).split(separator: ".").map { $0.trimmingCharacters(in: .whitespaces) })
+        } else if s.hasPrefix("header:") {
+            let name = s.dropFirst(7).trimmingCharacters(in: .whitespaces)
+            guard !name.isEmpty else { return nil }
+            self = .header(name)
+        } else {
+            return nil
+        }
+    }
+
+    func read(_ data: Data, _ resp: HTTPURLResponse?) throws -> Reading {
+        switch self {
+        case let .header(name):
+            guard let v = resp?.value(forHTTPHeaderField: name)?.trimmingCharacters(in: .whitespaces), !v.isEmpty else {
+                throw MessageError("no \(name) header")
+            }
+            if let n = Double(v), n.isFinite { return .number(n) }
+            return .text(v)
+
+        case let .body(path) where path.isEmpty:
+            let t = String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !t.isEmpty else { throw MessageError("empty body") }
+            return .text(String(t.prefix(40)))
+
+        case let .body(path):
+            guard var node = try? JSONSerialization.jsonObject(with: data, options: .fragmentsAllowed) else {
+                throw MessageError("body isn't JSON")
+            }
+            for key in path {
+                if let o = node as? [String: Any], let next = o[key] {
+                    node = next
+                } else if let a = node as? [Any], let i = Int(key), a.indices.contains(i) {
+                    node = a[i]
+                } else {
+                    throw MessageError("no \(path.joined(separator: ".")) in body")
+                }
+            }
+            if let n = node as? NSNumber {
+                if CFGetTypeID(n) == CFBooleanGetTypeID() { return .text(n.boolValue ? "true" : "false") }
+                return n.doubleValue.isFinite ? .number(n.doubleValue) : .text(n.stringValue)
+            }
+            if let t = node as? String, !t.isEmpty { return .text(t) }
+            throw MessageError("\(path.joined(separator: ".")) isn't a number or text")
+        }
     }
 }
 

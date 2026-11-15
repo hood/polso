@@ -25,7 +25,7 @@ A broken file doesn't kill the app: polso keeps running on defaults and shows `c
 | key | default (left / right) | |
 |---|---|---|
 | `title` | `"load 1m"` / `"memory"` | panel card title |
-| `indicator` | `"line"` / `"gauge"` | `line`, `gauge` or `dots`. See [Indicators](../indicators/) |
+| `indicator` | `"line"` / `"gauge"` | `line`, `gauge`, `dots`, `status`, `pills` or `none`. See [Indicators](../indicators/) |
 | `unit` | `""` / `"%"` | `%`, `ms`, `s` get smart formatting (`1.20s`, `850ms`). Units starting with `/` stick to the number (`12/s`). Anything else is appended verbatim |
 | `warn` | cores × 0.7 / `75` | yellow at or above. Optional |
 | `crit` | cores / `90` | red at or above. Optional |
@@ -34,6 +34,7 @@ A broken file doesn't kill the app: polso keeps running on defaults and shows `c
 | `history` | `30` | samples kept for the sparkline / dot matrix (min 2) |
 | `staleAfter` | `60` | seconds without data before the wing goes gray. `0` = never |
 | `blink` | `true` | flash the wing on every new value |
+| `alertOn` | `[]` | `"warn"`/`"crit"`: alert when the wing enters that level, info alert when it recovers. `"label"`: info alert when the label changes (`api: 1.4.1 → 1.4.2`). The first reading never alerts |
 
 `warn` must be below `crit` (above it when `invert` is on). The settings window and the panel footer say so if not.
 

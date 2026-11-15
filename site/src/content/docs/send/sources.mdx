@@ -1,6 +1,6 @@
 ---
 title: Sources
-description: Let polso poll shell commands, PromQL queries and /metrics endpoints on its own.
+description: Let polso poll shell commands, PromQL queries, /metrics endpoints and health checks on its own.
 ---
 
 import { Aside } from '@astrojs/starlight/components';
@@ -13,9 +13,9 @@ Fields shared by every kind:
 
 | field | default | |
 |---|---|---|
-| `kind` | | `exec`, `prometheus` or `scrape` |
-| `name` | command / query / metric | shown in errors and Settings |
-| `slot` | | wing that plain numbers go to. Required for `prometheus` and `scrape` |
+| `kind` | | `exec`, `prometheus`, `scrape` or `http` |
+| `name` | command / query / metric / url | shown in errors and Settings |
+| `slot` | | wing that plain numbers go to. Required for `prometheus`, `scrape` and `http` |
 | `every` | `15` | seconds between polls (min 1) |
 | `timeout` | `10` | seconds before a poll is abandoned |
 | `enabled` | `true` | |
@@ -82,3 +82,22 @@ Reads a Prometheus text exposition endpoint directly. No Prometheus server neede
 | `rate` | `true` turns a counter into a per-second rate between polls. The first poll yields nothing. Counter resets are skipped |
 
 All matching series are **summed**.
+
+## `http`
+
+GETs `url` and reads one `value` from the response. Health comes from the response: a 2xx is a healthy reading,
+anything else (non-2xx, timeout, refused connection, missing path or header) is `crit`.
+
+```json
+{"kind": "http", "slot": "left", "every": 10, "url": "https://api.internal/health", "value": "body:build.version"}
+```
+
+| `value` | reads |
+|---|---|
+| `body:build.version` | a dot path into the JSON body. Numeric segments index arrays (`checks.0.status`) |
+| `body:` | the whole body as text, for plain `/version` endpoints |
+| `header:X-Version` | a response header, case-insensitive |
+
+A number becomes a sample, judged by the wing's `warn`/`crit` (e.g. `header:X-Response-Time`). Text becomes the
+wing's label on a healthy reading: pair it with `"alertOn": ["label"]` to get an alert on every deploy. A failure
+keeps the last label and turns the wing red, so you see which version went down.
