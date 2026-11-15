@@ -53,7 +53,7 @@ config, socket and source errors, plus Settings and Quit.
 ```
  scripts, cron, CI ──► ~/.config/polso/sock ──┐
                          (NDJSON, mode 600)   ├──► Store ──► notch (SwiftUI, NSPanel above the menu bar)
- sources: exec · prometheus · scrape ─────────┘
+ sources: exec · prometheus · scrape · http ──┘
 ```
 
 - One `Store` holds both wings, the ping counters, the alert queue and the log. Socket lines and source results

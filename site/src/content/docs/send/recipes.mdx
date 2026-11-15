@@ -97,6 +97,19 @@ An alert with the same title only bumps a counter, so the banner isn't replayed 
   "metric": "jobs_failed_total", "rate": true }
 ```
 
+## Health check and deploys
+
+One wing: a status light with the running version, an alert when it goes down or a new version ships.
+
+```json
+"left":  { "title": "api", "indicator": "status", "alertOn": ["crit", "label"] },
+"right": { "indicator": "none" },
+"sources": [{ "kind": "http", "slot": "left", "every": 10,
+  "url": "https://api.internal/health", "value": "body:build.version" }]
+```
+
+Swap `none` for `pills` and point a second `http` source at it to see the uptime history next to it.
+
 ## Heartbeats from cron
 
 Mark a wing gray if a job stops reporting: give it `staleAfter` a bit above the job period and push a value each run.
