@@ -26,7 +26,8 @@ extension Indicator {
 }
 
 enum Indicators {
-    static let all: [IndicatorKind] = [LineIndicator.kind, GaugeIndicator.kind, DotsIndicator.kind]
+    static let all: [IndicatorKind] = [LineIndicator.kind, GaugeIndicator.kind, DotsIndicator.kind, StatusIndicator.kind, PillsIndicator.kind,
+                                         NoneIndicator.kind]
 
     static func find(_ id: String) -> IndicatorKind? { all.first { $0.id == id } }
 }

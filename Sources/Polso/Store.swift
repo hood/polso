@@ -21,6 +21,8 @@ final class Store: ObservableObject {
     var onSettings: (() -> Void)?
 
     private var queue: [AlertPayload] = []
+    private var seen: [Slot: (health: Health, label: String?)] = [:]   // last observation, for `alertOn`
+    private var failReason: String?
     private let poller = Poller()
     private var server: SocketServer?
     private var timer: Timer?
@@ -79,8 +81,12 @@ final class Store: ObservableObject {
                 sourceErrors[i] = nil
                 handle(msgs)
             case let .failure(e):
-                let name = i < config.sources.count ? config.sources[i].title : "source \(i + 1)"
-                sourceErrors[i] = "\(name): \(describe(e))"
+                let src = i < config.sources.count ? config.sources[i] : nil
+                sourceErrors[i] = "\(src?.title ?? "source \(i + 1)"): \(describe(e))"
+                // For an http source the failure is the reading: the service is down.
+                if let src, src.kind == .http, let slot = src.slot {
+                    handle([.value(slot, values: [], replace: false, label: nil, health: .crit)], reason: describe(e))
+                }
             }
         }
     }
@@ -111,7 +117,7 @@ final class Store: ObservableObject {
         }
         for s in Slot.allCases {
             let cap = c.slot(s).history
-            update(s) { if $0.history.count > cap { $0.history.removeFirst($0.history.count - cap) } }
+            update(s) { $0.trim(cap) }
         }
         if log.count > c.expanded.logSize { log.removeLast(log.count - c.expanded.logSize) }
         checkStale()
@@ -149,26 +155,33 @@ final class Store: ObservableObject {
 
     // MARK: messages
 
-    func handle(_ msgs: [Message]) {
+    func handle(_ msgs: [Message], reason: String? = nil) {
+        failReason = reason
+        defer { failReason = nil }
         for m in msgs {
             switch m {
             case let .value(slot, values, replace, label, health):
                 let cfg = config.slot(slot)
                 update(slot) { st in
-                    st.push(values, replace: replace, cap: cfg.history)
-                    // A sample carries its own label/health; a bare label/health message only patches those.
+                    // A sample carries its own label/health; a bare label/health message only patches those,
+                    // though a health on its own still counts as an observation (pills, alerts).
                     if !values.isEmpty || replace {
+                        st.push(values, health: health, replace: replace, cap: cfg.history)
                         st.label = label
                         st.health = health
                     } else {
                         if let label { st.label = label }
-                        if let health { st.health = health }
+                        if let health {
+                            st.health = health
+                            st.push(Sample(value: nil, health: health), cap: cfg.history)
+                        }
                     }
                     st.updated = Date()
                 }
                 if cfg.blink { beats[slot, default: 0] &+= 1 }
                 stale.remove(slot)
                 lastUpdate = Date()
+                watch(slot)
             case let .ping(slot, color):
                 ping(slot, color: parseColor(color))
             case let .alert(a):
@@ -176,6 +189,30 @@ final class Store: ObservableObject {
             case .settings:
                 onSettings?()
             }
+        }
+    }
+
+    /// Fires `alertOn` alerts on health level changes and label changes. The first observation only sets the baseline.
+    private func watch(_ slot: Slot) {
+        let cfg = config.slot(slot)
+        let st = state(slot)
+        let h = health(slot)
+        guard h != .unknown else { return }
+        let prev = seen[slot]
+        seen[slot] = (h, st.label ?? prev?.label)
+        guard let prev, !cfg.alertOn.isEmpty else { return }
+        let on = Set(cfg.alertOn)
+        func rank(_ h: Health) -> Int { h == .crit ? 2 : h == .warn ? 1 : 0 }
+        let level = on.contains("warn") ? 1 : on.contains("crit") ? 2 : Int.max
+        let now = st.label ?? fmt(st.value, unit: cfg.unit)
+        if rank(h) >= level, rank(h) > rank(prev.health) {
+            announce(AlertPayload(title: "\(cfg.title) \(h == .crit ? "critical" : "warning")",
+                                  summary: failReason ?? now, severity: h == .crit ? .crit : .warn, count: 1, url: nil))
+        } else if rank(prev.health) >= level, rank(h) < level {
+            announce(AlertPayload(title: "\(cfg.title) recovered", summary: now, severity: .info, count: 1, url: nil))
+        }
+        if on.contains("label"), let old = prev.label, let new = st.label, old != new {
+            announce(AlertPayload(title: "\(cfg.title): \(old) → \(new)", summary: nil, severity: .info, count: 1, url: nil))
         }
     }
 

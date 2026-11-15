@@ -186,6 +186,30 @@ func snapshot(to dir: String) async {
         store.config.right.indicator = ind.id
         write(RootView(store: store, ui: ui).frame(width: idle.width + 40, height: idle.height + 20), "idle-\(ind.id)", scale: 3)
     }
+    // Health check setup: status light with a version label, uptime pills with an outage and a gap.
+    let checks = store
+    checks.config.left.indicator = "status"
+    checks.config.right.indicator = "pills"
+    let saved = (checks.left, checks.right)
+    (checks.left, checks.right) = (SlotState(), SlotState())
+    checks.handle([.value(.left, values: [], replace: false, label: "v1.4.2", health: .ok)])
+    for h in [Health.ok, .ok, .ok, .ok, .ok, .warn, .crit, .crit, .unknown, .ok, .ok, .ok, .ok, .ok, .ok] {
+        checks.handle([.value(.right, values: [], replace: false, label: nil, health: h)])
+    }
+    write(RootView(store: checks, ui: ui).frame(width: idle.width + 40, height: idle.height + 20), "idle-healthcheck", scale: 3)
+    checks.handle([.value(.left, values: [], replace: false, label: nil, health: .crit)])
+    write(RootView(store: checks, ui: ui).frame(width: idle.width + 40, height: idle.height + 20), "idle-healthcheck-down", scale: 3)
+    ui.expanded = true
+    write(RootView(store: checks, ui: ui).frame(width: c.expanded.width + 2 * earRadius + 40, height: c.expanded.height + 20),
+          "expanded-healthcheck", scale: 2)
+    checks.config.right.indicator = "none"
+    ui.expanded = false
+    write(RootView(store: checks, ui: ui).frame(width: idle.width + 40, height: idle.height + 20), "idle-healthcheck-single", scale: 3)
+    ui.expanded = true
+    write(RootView(store: checks, ui: ui).frame(width: c.expanded.width + 2 * earRadius + 40, height: c.expanded.height + 20),
+          "expanded-healthcheck-single", scale: 2)
+    ui.expanded = false
+    (checks.left, checks.right) = saved
     store.config.left.indicator = c.left.indicator
     store.config.right.indicator = c.right.indicator
 

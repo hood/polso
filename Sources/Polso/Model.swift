@@ -79,20 +79,41 @@ enum Severity: String, Codable {
     }
 }
 
+/// One observation: a number, a health, or both. `health` nil means "judge `value` by the thresholds".
+struct Sample: Equatable {
+    var value: Double?
+    var health: Health?
+
+    func health(_ c: SlotConfig) -> Health { health ?? Health.of(value, c) }
+}
+
 /// What one wing currently shows.
 struct SlotState {
     var value: Double?
-    var history: [Double] = []
+    var samples: [Sample] = []
     var label: String?        // sender-provided text, replaces the formatted value
     var health: Health?       // sender override of the threshold colour
     var updated: Date?
 
-    mutating func push(_ vs: [Double], replace: Bool, cap: Int) {
+    /// Numeric history for the sparkline / dot matrix / gauge.
+    var history: [Double] { samples.compactMap(\.value) }
+
+    mutating func push(_ vs: [Double], health: Health?, replace: Bool, cap: Int) {
         let vs = vs.filter(\.isFinite)
         guard !vs.isEmpty else { return }
-        history = replace ? vs : history + vs
-        if history.count > cap { history.removeFirst(history.count - cap) }
+        let new = vs.map { Sample(value: $0, health: health) }
+        samples = replace ? new : samples + new
+        trim(cap)
         value = vs.last
+    }
+
+    mutating func push(_ s: Sample, cap: Int) {
+        samples.append(s)
+        trim(cap)
+    }
+
+    mutating func trim(_ cap: Int) {
+        if samples.count > cap { samples.removeFirst(samples.count - cap) }
     }
 }
 

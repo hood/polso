@@ -16,6 +16,9 @@ struct SlotConfig: Codable, Equatable {
     var history: Int          // samples kept for the sparkline / dot matrix
     var staleAfter: Double    // seconds without data before the wing goes gray; 0 = never
     var blink: Bool           // flash the wing on every new value
+    var alertOn: [String] = []   // "warn"/"crit": alert on entering that level (and on recovery); "label": on label change
+
+    static let alertTriggers = ["warn", "crit", "label"]
 }
 
 struct PingConfig: Codable, Equatable {
@@ -39,13 +42,14 @@ struct ExpandedConfig: Codable, Equatable {
 }
 
 enum SourceKind: String, Codable, CaseIterable {
-    case exec, prometheus, scrape
+    case exec, prometheus, scrape, http
 
     var label: String {
         switch self {
         case .exec: "Command"
         case .prometheus: "PromQL"
         case .scrape: "Scrape /metrics"
+        case .http: "HTTP check"
         }
     }
 }
@@ -67,10 +71,12 @@ struct SourceConfig: Codable, Equatable {
     var metric: String?
     var labels: [String: String]?
     var rate: Bool?           // per-second rate of a counter instead of its raw value
+    // http (uses `url` too): "body:<dot.path>" or "header:<Name>"
+    var value: String?
 
     var interval: Double { Swift.max(1, every ?? 15) }
     var isOn: Bool { enabled ?? true }
-    var title: String { name ?? command ?? query ?? metric ?? kind.rawValue }
+    var title: String { name ?? command ?? query ?? metric ?? url ?? kind.rawValue }
 }
 
 struct Config: Codable, Equatable {
@@ -155,6 +161,9 @@ struct Config: Codable, Equatable {
             }
             if c.history < 2 { return "\(s.rawValue): keep at least 2 samples" }
             if Indicators.find(c.indicator) == nil { return "\(s.rawValue): unknown indicator \"\(c.indicator)\"" }
+            if let bad = c.alertOn.first(where: { !SlotConfig.alertTriggers.contains($0) }) {
+                return "\(s.rawValue): alertOn \"\(bad)\" isn't one of warn, crit, label"
+            }
         }
         if socket.trimmingCharacters(in: .whitespaces).isEmpty { return "Socket path can't be empty" }
         if socketPath.utf8.count > 103 { return "Socket path is too long (max 103 bytes)" }
@@ -170,6 +179,10 @@ struct Config: Codable, Equatable {
             case .scrape:
                 if URL(string: s.url ?? "")?.scheme == nil { return "\(n): not a valid URL" }
                 if (s.metric ?? "").isEmpty { return "\(n): metric is empty" }
+                if s.slot == nil { return "\(n): pick a wing" }
+            case .http:
+                if URL(string: s.url ?? "")?.scheme == nil { return "\(n): not a valid URL" }
+                if HTTPField(s.value ?? "") == nil { return "\(n): value must be body:<path> or header:<name>" }
                 if s.slot == nil { return "\(n): pick a wing" }
             }
         }

@@ -24,7 +24,7 @@ struct ExpandedView: View {
             .padding(.horizontal, 4)
 
             HStack(alignment: .top, spacing: 10) {
-                ForEach(Slot.allCases, id: \.self) { s in
+                ForEach(Slot.allCases.filter { store.config.slot($0).indicator != NoneIndicator.id }, id: \.self) { s in
                     KPICard(config: store.config.slot(s), state: store.state(s), health: store.health(s))
                 }
             }
@@ -72,11 +72,18 @@ struct KPICard: View {
                 .foregroundStyle(health.color)
                 .contentTransition(.numericText())
                 .lineLimit(1).minimumScaleFactor(0.5)
-            Sparkline(values: state.history, color: health.color, floor: config.warn ?? 0, lineWidth: 1.5, fill: true,
-                      guides: config.guides)
-                .frame(height: 36)
+            Group {
+                if config.indicator == PillsIndicator.id || state.history.isEmpty && !state.samples.isEmpty {
+                    PillStrip(input: IndicatorInput(state: state, config: config, health: health), slots: config.history)
+                        .padding(.horizontal, -8)
+                } else {
+                    Sparkline(values: state.history, color: health.color, floor: config.warn ?? 0, lineWidth: 1.5, fill: true,
+                              guides: config.guides)
+                }
+            }
+            .frame(height: 36)
             HStack {
-                Text("\(state.history.count) samples"); Spacer()
+                Text("\(state.samples.count) samples"); Spacer()
                 Text(thresholds); Spacer()
                 Text(state.updated.map { age($0) } ?? "–")
             }
